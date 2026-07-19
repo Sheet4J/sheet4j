@@ -51,4 +51,6 @@ jobs:
           retention-days: 30
           path: |
             core/target/*.jar
+            engraving/target/*.jar
+            fxdemo/target/*.jar
             fxviewer/target/*.jar
