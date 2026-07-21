@@ -12,13 +12,22 @@
         }
         #osmd-container {
             width: 100%;
-            min-height: 100vh;
             background: #ffffff;
         }
+        /*
+            The status banner is useful when a human loads this page directly,
+            but must not add pixels above OSMD's SVG in the automated snapshot
+            (the Java driver crops to the OSMD container bounds).
+        */
         #status {
+            position: fixed;
+            bottom: 0;
+            right: 0;
             font-size: 11px;
             color: #666;
-            padding: 4px 8px;
+            padding: 2px 6px;
+            background: rgba(255, 255, 255, 0.7);
+            pointer-events: none;
         }
     </style>
     <!--
@@ -29,8 +38,8 @@
     <script src="opensheetmusicdisplay.min.js"></script>
 </head>
 <body>
-<div id="status">idle</div>
 <div id="osmd-container"></div>
+<div id="status">idle</div>
 <script>
     // The Java side polls document.title for one of the sentinel values below.
     //   "sheet4j:idle"    – no render in progress
@@ -83,7 +92,25 @@
                     // braces buffer for slow WebKit builds.
                     requestAnimationFrame(function () {
                         requestAnimationFrame(function () {
-                            setTimeout(function () { setStatus("done"); }, 100);
+                            setTimeout(function () {
+                                // Publish the actual OSMD content bounds so the
+                                // Java side can crop the WebView snapshot to a
+                                // tight box (avoiding trailing whitespace and
+                                // uncovering content taller than the viewport).
+                                var container = document.getElementById("osmd-container");
+                                var rect = container.getBoundingClientRect();
+                                var svg = container.querySelector("svg");
+                                var w = Math.ceil(rect.width);
+                                var h = Math.ceil(rect.height);
+                                if (svg) {
+                                    var sr = svg.getBoundingClientRect();
+                                    w = Math.max(w, Math.ceil(sr.width));
+                                    h = Math.max(h, Math.ceil(sr.height));
+                                }
+                                window.__sheet4jContentWidth = w;
+                                window.__sheet4jContentHeight = h;
+                                setStatus("done");
+                            }, 100);
                         });
                     });
                 } catch (renderErr) {

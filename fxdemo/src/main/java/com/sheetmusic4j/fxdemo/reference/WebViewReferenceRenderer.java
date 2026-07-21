@@ -14,8 +14,10 @@ import javafx.scene.Scene;
 import javafx.scene.SnapshotParameters;
 import javafx.scene.image.WritableImage;
 import javafx.scene.paint.Color;
+import javafx.scene.web.WebEngine;
 import javafx.scene.web.WebView;
 import javafx.stage.Stage;
+import javafx.stage.StageStyle;
 
 /**
  * Renders a MusicXML string into a {@link BufferedImage} by driving a JavaFX
@@ -148,17 +150,28 @@ public final class WebViewReferenceRenderer {
         }
     }
 
+    /**
+     * The WebView is created much taller than the caller's requested height so
+     * that OSMD, which lays out an arbitrary number of systems, has room to
+     * render its full SVG. The Java side then queries the actual content
+     * height from JavaScript and crops the snapshot down to a tight box.
+     */
+    private static final int WEBVIEW_HEIGHT = 6000;
+
     private void renderOnFxThread(String pageUrl, String musicXml, int widthPx, int heightPx,
                                   CompletableFuture<Result> future) {
         WebView view;
         Stage stage;
         try {
+            int viewHeight = Math.max(heightPx, WEBVIEW_HEIGHT);
             view = new WebView();
-            view.setPrefSize(widthPx, heightPx);
-            view.setMinSize(widthPx, heightPx);
-            view.setMaxSize(widthPx, heightPx);
-            stage = new Stage();
-            Scene scene = new Scene(view, widthPx, heightPx, Color.WHITE);
+            view.setPrefSize(widthPx, viewHeight);
+            view.setMinSize(widthPx, viewHeight);
+            view.setMaxSize(widthPx, viewHeight);
+            // Undecorated: window chrome (title bar, borders) would eat pixels
+            // off the client area, so a 300px-tall scene ends up ~272px tall.
+            stage = new Stage(StageStyle.UNDECORATED);
+            Scene scene = new Scene(view, widthPx, viewHeight, Color.WHITE);
             stage.setScene(scene);
             // WebView's WebKit backing surface only gets composited into the
             // scene graph after the Stage has actually gone through paint
@@ -167,8 +180,6 @@ public final class WebViewReferenceRenderer {
             // real, then close it once the snapshot has been captured.
             stage.setX(-100_000);
             stage.setY(-100_000);
-            stage.setWidth(widthPx);
-            stage.setHeight(heightPx);
             stage.show();
         } catch (Throwable t) {
             future.complete(Result.error("Failed to create WebView: " + t.getMessage()));
@@ -177,6 +188,7 @@ public final class WebViewReferenceRenderer {
 
         final Stage finalStage = stage;
         final WebView finalView = view;
+        final int finalHeightHint = heightPx;
 
         var engine = view.getEngine();
         engine.getLoadWorker().stateProperty().addListener((obs, oldState, newState) -> {
@@ -196,7 +208,7 @@ public final class WebViewReferenceRenderer {
                 // commit WebKit's rendered content to the WebView node before
                 // snapshotting. Two nested runLaters is a well-known idiom.
                 Platform.runLater(() -> Platform.runLater(() ->
-                        snapshotAndComplete(finalView, finalStage, future)));
+                        snapshotAndComplete(finalView, finalStage, engine, widthPx, finalHeightHint, future)));
             } else if (newTitle.equals(TITLE_MISSING)) {
                 completeAndClose(finalStage, future, Result.unavailable());
             } else if (newTitle.startsWith(TITLE_ERROR_PREFIX)) {
@@ -226,7 +238,9 @@ public final class WebViewReferenceRenderer {
         }
     }
 
-    private void snapshotAndComplete(WebView view, Stage stage, CompletableFuture<Result> future) {
+    private void snapshotAndComplete(WebView view, Stage stage, WebEngine engine,
+                                     int widthPx, int heightHint,
+                                     CompletableFuture<Result> future) {
         try {
             // Force a layout pass so WebView's peer has current bounds before we snapshot.
             if (view.getScene() != null && view.getScene().getRoot() != null) {
@@ -237,10 +251,43 @@ public final class WebViewReferenceRenderer {
             params.setFill(Color.WHITE);
             WritableImage fxImage = view.snapshot(params, null);
             BufferedImage image = SwingFXUtils.fromFXImage(fxImage, null);
-            completeAndClose(stage, future, Result.success(image));
+            BufferedImage cropped = cropToContent(image, engine, widthPx, heightHint);
+            completeAndClose(stage, future, Result.success(cropped));
         } catch (Throwable t) {
             completeAndClose(stage, future, Result.error("Snapshot failed: " + t.getMessage()));
         }
+    }
+
+    /**
+     * Crop the raw WebView snapshot down to the actual OSMD content bounds
+     * published by {@code index.html} in {@code window.__sheet4jContentWidth}
+     * / {@code __sheet4jContentHeight}. Falls back to the caller's height hint
+     * when JavaScript did not publish content bounds (e.g. because OSMD
+     * silently produced nothing).
+     */
+    private static BufferedImage cropToContent(BufferedImage full, WebEngine engine,
+                                               int widthPx, int heightHint) {
+        int contentWidth = readIntFromJs(engine, "window.__sheet4jContentWidth", widthPx);
+        int contentHeight = readIntFromJs(engine, "window.__sheet4jContentHeight", heightHint);
+        int w = Math.max(1, Math.min(contentWidth, full.getWidth()));
+        int h = Math.max(1, Math.min(contentHeight, full.getHeight()));
+        if (w == full.getWidth() && h == full.getHeight()) {
+            return full;
+        }
+        return full.getSubimage(0, 0, w, h);
+    }
+
+    private static int readIntFromJs(WebEngine engine, String expression, int fallback) {
+        try {
+            Object v = engine.executeScript(expression);
+            if (v instanceof Number n) {
+                int i = (int) Math.ceil(n.doubleValue());
+                return i > 0 ? i : fallback;
+            }
+        } catch (Throwable ignore) {
+            // fall through
+        }
+        return fallback;
     }
 
     /**
