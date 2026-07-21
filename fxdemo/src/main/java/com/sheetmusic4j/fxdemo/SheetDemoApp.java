@@ -157,8 +157,13 @@ public final class SheetDemoApp extends Application {
         showRehearsalMarks.setSelected(true);
         showRehearsalMarks.setOnAction(e -> toggleTextCategories(showRehearsalMarks.isSelected(),
                 MarkingCategory.REHEARSAL));
+        CheckMenuItem showChordSymbols = new CheckMenuItem("Show chord symbols");
+        showChordSymbols.setSelected(true);
+        showChordSymbols.setOnAction(e -> toggleTextCategories(showChordSymbols.isSelected(),
+                MarkingCategory.CHORD_SYMBOL));
         textMenu.getItems().addAll(showTitles, showCreators, showLyrics,
-                showTempo, showDirections, showDynamics, showRehearsalMarks);
+                showTempo, showDirections, showDynamics, showRehearsalMarks,
+                showChordSymbols);
         viewMenu.getItems().add(textMenu);
 
         Menu helpMenu = new Menu("Help");

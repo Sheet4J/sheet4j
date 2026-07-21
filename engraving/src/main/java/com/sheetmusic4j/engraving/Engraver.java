@@ -15,6 +15,7 @@ import com.sheetmusic4j.core.model.Creator;
 import com.sheetmusic4j.core.model.Direction;
 import com.sheetmusic4j.core.model.DirectionType;
 import com.sheetmusic4j.core.model.DynamicMark;
+import com.sheetmusic4j.core.model.Harmony;
 import com.sheetmusic4j.core.model.KeySignature;
 import com.sheetmusic4j.core.model.Lyric;
 import com.sheetmusic4j.core.model.Measure;
@@ -86,6 +87,29 @@ public final class Engraver {
      * direction placed above the staff.
      */
     private static final double DIRECTION_ABOVE_RESERVE_GAPS = 3.0;
+
+    /**
+     * Additional vertical space (in staff-line gaps) reserved above the top
+     * staff of a system when at least one part in that system carries a
+     * chord symbol. When both {@link #DIRECTION_ABOVE_RESERVE_GAPS above
+     * directions} and chord symbols are present in the same row we sum the
+     * two reserves so the two categories don't visually overlap.
+     */
+    private static final double HARMONY_ABOVE_RESERVE_GAPS = 2.0;
+
+    /**
+     * Distance (in staff-line gaps) from the top staff line to the baseline
+     * of a chord-symbol label. Chord symbols conventionally sit closer to the
+     * staff than tempo/words directions so performers can read them alongside
+     * the notes.
+     */
+    private static final double HARMONY_OFFSET_GAPS = 3.5;
+
+    /**
+     * Multiplier applied to the staff-line gap to derive the chord-symbol
+     * font size.
+     */
+    private static final double HARMONY_FONT_SIZE_GAPS = 1.6;
 
     /**
      * Distance (in staff-line gaps) from a staff to a direction's baseline
@@ -162,14 +186,23 @@ public final class Engraver {
             List<StaffLayout> stavesForRow = new ArrayList<>();
             double staffTop = y;
             boolean rowHasAboveDirections = false;
+            boolean rowHasHarmony = false;
             for (PartInfo p : parts) {
-                if (p.hasDirectionsAboveInRange(start, endExclusive)) {
+                if (!rowHasAboveDirections && p.hasDirectionsAboveInRange(start, endExclusive)) {
                     rowHasAboveDirections = true;
+                }
+                if (!rowHasHarmony && p.hasHarmonyInRange(start, endExclusive)) {
+                    rowHasHarmony = true;
+                }
+                if (rowHasAboveDirections && rowHasHarmony) {
                     break;
                 }
             }
             if (rowHasAboveDirections) {
                 staffTop += options.staffLineGap() * DIRECTION_ABOVE_RESERVE_GAPS;
+            }
+            if (rowHasHarmony) {
+                staffTop += options.staffLineGap() * HARMONY_ABOVE_RESERVE_GAPS;
             }
             for (PartInfo p : parts) {
                 for (int staffIdx = 0; staffIdx < p.staveCount(); staffIdx++) {
@@ -284,12 +317,14 @@ public final class Engraver {
         private final boolean hasLyrics;
         private final boolean[] hasDirectionsAbovePerMeasure;
         private final boolean hasDirectionsBelow;
+        private final boolean[] hasHarmonyPerMeasure;
 
         private PartInfo(Part part, int staveCount,
                          Clef[][] clefs, KeySignature[] keys, TimeSignature[] times,
                          boolean hasLyrics,
                          boolean[] hasDirectionsAbovePerMeasure,
-                         boolean hasDirectionsBelow) {
+                         boolean hasDirectionsBelow,
+                         boolean[] hasHarmonyPerMeasure) {
             this.part = part;
             this.staveCount = staveCount;
             this.clefsPerMeasure = clefs;
@@ -298,6 +333,7 @@ public final class Engraver {
             this.hasLyrics = hasLyrics;
             this.hasDirectionsAbovePerMeasure = hasDirectionsAbovePerMeasure;
             this.hasDirectionsBelow = hasDirectionsBelow;
+            this.hasHarmonyPerMeasure = hasHarmonyPerMeasure;
         }
 
         boolean hasLyrics() {
@@ -312,6 +348,16 @@ public final class Engraver {
             int upper = Math.min(endExclusive, hasDirectionsAbovePerMeasure.length);
             for (int i = Math.max(0, start); i < upper; i++) {
                 if (hasDirectionsAbovePerMeasure[i]) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        boolean hasHarmonyInRange(int start, int endExclusive) {
+            int upper = Math.min(endExclusive, hasHarmonyPerMeasure.length);
+            for (int i = Math.max(0, start); i < upper; i++) {
+                if (hasHarmonyPerMeasure[i]) {
                     return true;
                 }
             }
@@ -416,6 +462,7 @@ public final class Engraver {
                 }
                 boolean[] aboveMask = new boolean[n];
                 boolean belowAny = false;
+                boolean[] harmonyMask = new boolean[n];
                 for (int idx = 0; idx < n; idx++) {
                 Measure measure = part.measures().get(idx);
                 for (MusicElement element : measure.elements()) {
@@ -426,11 +473,13 @@ public final class Engraver {
                         } else if (resolved == Placement.BELOW) {
                             belowAny = true;
                         }
+                    } else if (element instanceof Harmony) {
+                        harmonyMask[idx] = true;
                     }
                 }
                 }
                 return new PartInfo(part, staveCount, clefs, keys, times, scanHasLyrics(part),
-                    aboveMask, belowAny);
+                    aboveMask, belowAny, harmonyMask);
                 }
 
             /**
@@ -737,13 +786,14 @@ public final class Engraver {
             }
 
             List<MusicElement> elements = filterElementsForStaff(measure.elements(), staffNumber, staveCount);
-            // Directions occupy zero time but appear in document order among
-            // notes/rests/chords. We size the measure only by the time-
-            // consuming elements and then map each Direction to the x of the
-            // *next* time-consuming element (falling back to the last one).
+            // Directions and harmony markers occupy zero time but appear in
+            // document order among notes/rests/chords. We size the measure
+            // only by the time-consuming elements and then map each zero-
+            // duration element to the x of the *next* time-consuming element
+            // (falling back to the last one, or to the content start).
             List<MusicElement> timedElements = new ArrayList<>(elements.size());
             for (MusicElement element : elements) {
-                if (!(element instanceof Direction)) {
+                if (!(element instanceof Direction) && !(element instanceof Harmony)) {
                     timedElements.add(element);
                 }
             }
@@ -761,16 +811,14 @@ public final class Engraver {
             for (int i = 0, timedIdx = 0; i < elements.size(); i++) {
                 MusicElement element = elements.get(i);
                 if (element instanceof Direction direction) {
-                    double dirX;
-                    if (timedIdx < timedX.length) {
-                        dirX = timedX[timedIdx];
-                    } else if (timedX.length > 0) {
-                        dirX = timedX[timedX.length - 1];
-                    } else {
-                        dirX = fallbackX;
-                    }
+                    double dirX = anchorX(timedX, timedIdx, fallbackX);
                     if (staffIdx == 0) {
                         placeDirection(texts, glyphs, direction, dirX, y, options);
+                    }
+                } else if (element instanceof Harmony harmony) {
+                    double harmonyX = anchorX(timedX, timedIdx, fallbackX);
+                    if (staffIdx == 0) {
+                        placeHarmony(texts, harmony, harmonyX, y, options);
                     }
                 } else {
                     double noteX = timedX[timedIdx++];
@@ -953,6 +1001,38 @@ public final class Engraver {
                     TextPlacement.Align.LEFT, MarkingCategory.REHEARSAL, true));
         }
         }
+
+    /**
+     * Resolve the x-anchor for a zero-duration element (direction or
+     * harmony). Chord symbols and directions anchor to the next time-
+     * consuming element's x; when the source places them after the last
+     * note we fall back to that last x, and when the whole measure carries
+     * no timed elements we fall back to {@code fallbackX}.
+     */
+    private static double anchorX(double[] timedX, int nextTimedIdx, double fallbackX) {
+        if (nextTimedIdx < timedX.length) {
+            return timedX[nextTimedIdx];
+        }
+        if (timedX.length > 0) {
+            return timedX[timedX.length - 1];
+        }
+        return fallbackX;
+    }
+
+    /**
+     * Emit the chord-symbol {@link TextPlacement} for a {@link Harmony} at
+     * the given anchor x. Chord symbols sit above the staff, higher than
+     * words/tempo directions so the two categories don't overlap when both
+     * appear on the same measure.
+     */
+    private void placeHarmony(List<TextPlacement> texts, Harmony harmony,
+                              double x, double staffY, LayoutOptions options) {
+        double gap = options.staffLineGap();
+        double fontSize = gap * HARMONY_FONT_SIZE_GAPS;
+        double y = staffY - gap * HARMONY_OFFSET_GAPS;
+        texts.add(new TextPlacement(harmony.displayLabel(), x, y, fontSize,
+                TextPlacement.Align.LEFT, MarkingCategory.CHORD_SYMBOL, false));
+    }
 
     /**
      * Resolve a {@link Direction}'s effective placement. Explicit ABOVE/BELOW

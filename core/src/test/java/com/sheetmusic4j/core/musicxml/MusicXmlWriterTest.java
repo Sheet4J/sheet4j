@@ -15,6 +15,8 @@ import com.sheetmusic4j.core.model.Direction;
 import com.sheetmusic4j.core.model.DirectionType;
 import com.sheetmusic4j.core.model.Duration;
 import com.sheetmusic4j.core.model.DynamicMark;
+import com.sheetmusic4j.core.model.Harmony;
+import com.sheetmusic4j.core.model.HarmonyKind;
 import com.sheetmusic4j.core.model.Lyric;
 import com.sheetmusic4j.core.model.Measure;
 import com.sheetmusic4j.core.model.MusicElement;
@@ -181,6 +183,51 @@ class MusicXmlWriterTest {
     }
 
     @Test
+    void roundTripPreservesHarmony() {
+        int divisions = 1;
+        Harmony major = new Harmony(
+                new Harmony.Root(Step.B, 0),
+                HarmonyKind.MAJOR_SEVENTH,
+                java.util.Optional.empty(),
+                java.util.Optional.of("Maj7"));
+        Harmony minorNinth = new Harmony(
+                new Harmony.Root(Step.G, 1),
+                HarmonyKind.MINOR_NINTH,
+                java.util.Optional.empty(),
+                java.util.Optional.of("m9"));
+        Harmony slash = new Harmony(
+                new Harmony.Root(Step.G, 0),
+                HarmonyKind.DOMINANT_SEVENTH,
+                java.util.Optional.of(new Harmony.Bass(Step.D, 0)),
+                java.util.Optional.empty());
+        Note note = Note.builder()
+                .pitch(new Pitch(Step.C, 4))
+                .duration(new Duration(1, divisions))
+                .type(NoteType.QUARTER)
+                .build();
+        Measure measure = Measure.builder(1)
+                .attributes(Attributes.builder().divisions(divisions).clef(Clef.treble()).build())
+                .addElement(major)
+                .addElement(minorNinth)
+                .addElement(slash)
+                .addElement(note)
+                .build();
+        Score original = Score.builder()
+                .addPart(Part.builder("P1").name("V").addMeasure(measure).build())
+                .build();
+
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        new MusicXmlWriter().write(original, out);
+        Score reparsed = new MusicXmlReader().read(new ByteArrayInputStream(out.toByteArray()));
+
+        var elements = reparsed.parts().get(0).measures().get(0).elements();
+        assertEquals(4, elements.size());
+        assertSameElement(major, elements.get(0));
+        assertSameElement(minorNinth, elements.get(1));
+        assertSameElement(slash, elements.get(2));
+    }
+
+    @Test
     void roundTripPreservesRehearsalDirection() {
         int divisions = 1;
         Direction rehearsal = new Direction(
@@ -222,5 +269,11 @@ class MusicXmlWriterTest {
             assertEquals(da.placement(), db.placement());
             assertEquals(da.type(), db.type());
         }
-    }
+        if (a instanceof Harmony ha && b instanceof Harmony hb) {
+            assertEquals(ha.root(), hb.root());
+            assertEquals(ha.kind(), hb.kind());
+            assertEquals(ha.bass(), hb.bass());
+            assertEquals(ha.textOverride(), hb.textOverride());
+        }
+        }
     }

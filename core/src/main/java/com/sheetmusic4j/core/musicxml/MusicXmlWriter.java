@@ -21,6 +21,7 @@ import com.sheetmusic4j.core.model.Clef;
 import com.sheetmusic4j.core.model.Creator;
 import com.sheetmusic4j.core.model.Direction;
 import com.sheetmusic4j.core.model.DirectionType;
+import com.sheetmusic4j.core.model.Harmony;
 import com.sheetmusic4j.core.model.KeySignature;
 import com.sheetmusic4j.core.model.Lyric;
 import com.sheetmusic4j.core.model.Measure;
@@ -126,10 +127,12 @@ public final class MusicXmlWriter {
                 }
             } else if (element instanceof Direction direction) {
                 writeDirection(w, direction);
+            } else if (element instanceof Harmony harmony) {
+                writeHarmony(w, harmony);
             }
-        }
-        w.end("measure");
-    }
+            }
+            w.end("measure");
+            }
 
     private void writeAttributes(IndentingWriter w, Attributes attributes) {
         try {
@@ -286,6 +289,43 @@ public final class MusicXmlWriter {
      */
     private void writeRehearsal(IndentingWriter w, DirectionType.Rehearsal rehearsal) throws XMLStreamException {
         w.textElement("rehearsal", rehearsal.label());
+    }
+
+    /**
+     * Emit a MusicXML {@code <harmony>} block for the given {@link Harmony}.
+     * Follows the DTD-mandated {@code <root>} → {@code <kind>} →
+     * {@code <bass>} child order; {@code <root-alter>} / {@code <bass-alter>}
+     * are omitted when the alter is zero (canonical form).
+     */
+    private void writeHarmony(IndentingWriter w, Harmony harmony) {
+        try {
+            w.start("harmony");
+            w.start("root");
+            w.textElement("root-step", harmony.root().step().name());
+            if (harmony.root().alter() != 0) {
+                w.textElement("root-alter", Integer.toString(harmony.root().alter()));
+            }
+            w.end("root");
+            String textOverride = harmony.textOverride().orElse(null);
+            String kindXml = harmony.kind().xmlValue();
+            if (textOverride != null) {
+                w.textElementWithAttr("kind", "text", textOverride, kindXml);
+            } else {
+                w.textElement("kind", kindXml);
+            }
+            if (harmony.bass().isPresent()) {
+                Harmony.Bass bass = harmony.bass().get();
+                w.start("bass");
+                w.textElement("bass-step", bass.step().name());
+                if (bass.alter() != 0) {
+                    w.textElement("bass-alter", Integer.toString(bass.alter()));
+                }
+                w.end("bass");
+            }
+            w.end("harmony");
+        } catch (XMLStreamException e) {
+            throw new MusicXmlException("Failed to write harmony", e);
+        }
     }
 
     private void writeRest(IndentingWriter w, Rest rest) {

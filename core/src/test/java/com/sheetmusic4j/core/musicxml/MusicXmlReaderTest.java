@@ -18,6 +18,8 @@ import com.sheetmusic4j.core.model.Creator;
 import com.sheetmusic4j.core.model.Direction;
 import com.sheetmusic4j.core.model.DirectionType;
 import com.sheetmusic4j.core.model.DynamicMark;
+import com.sheetmusic4j.core.model.Harmony;
+import com.sheetmusic4j.core.model.HarmonyKind;
 import com.sheetmusic4j.core.model.Lyric;
 import com.sheetmusic4j.core.model.MusicElement;
 import com.sheetmusic4j.core.model.Note;
@@ -582,6 +584,174 @@ class MusicXmlReaderTest {
                   </part>
                 </score-partwise>
                 """;
+    }
+
+    @Test
+    void readsMajorSeventhHarmony() {
+        String xml = harmonyXml("""
+                <harmony>
+                  <root>
+                    <root-step>B</root-step>
+                  </root>
+                  <kind text="Maj7">major-seventh</kind>
+                </harmony>
+                """);
+        Score score = new MusicXmlReader().read(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)));
+        var elements = score.parts().get(0).measures().get(0).elements();
+        Harmony harmony = (Harmony) elements.get(0);
+        assertEquals(Step.B, harmony.root().step());
+        assertEquals(0, harmony.root().alter());
+        assertEquals(HarmonyKind.MAJOR_SEVENTH, harmony.kind());
+        assertTrue(harmony.bass().isEmpty());
+        assertEquals("Maj7", harmony.textOverride().orElse(null));
+        assertEquals("BMaj7", harmony.displayLabel());
+    }
+
+    @Test
+    void readsSlashChordHarmony() {
+        String xml = harmonyXml("""
+                <harmony>
+                  <root>
+                    <root-step>B</root-step>
+                  </root>
+                  <kind text="Maj7">major-seventh</kind>
+                  <bass>
+                    <bass-step>D</bass-step>
+                    <bass-alter>1</bass-alter>
+                  </bass>
+                </harmony>
+                """);
+        Score score = new MusicXmlReader().read(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)));
+        Harmony harmony = (Harmony) score.parts().get(0).measures().get(0).elements().get(0);
+        assertTrue(harmony.bass().isPresent());
+        assertEquals(Step.D, harmony.bass().get().step());
+        assertEquals(1, harmony.bass().get().alter());
+        assertEquals("BMaj7/D\u266F", harmony.displayLabel());
+    }
+
+    @Test
+    void readsHarmonyWithoutKindText() {
+        String xml = harmonyXml("""
+                <harmony>
+                  <root>
+                    <root-step>C</root-step>
+                  </root>
+                  <kind>minor-seventh</kind>
+                </harmony>
+                """);
+        Score score = new MusicXmlReader().read(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)));
+        Harmony harmony = (Harmony) score.parts().get(0).measures().get(0).elements().get(0);
+        assertTrue(harmony.textOverride().isEmpty());
+        assertEquals("Cm7", harmony.displayLabel());
+    }
+
+    @Test
+    void readsHarmonyWithRootAlter() {
+        String xml = harmonyXml("""
+                <harmony>
+                  <root>
+                    <root-step>G</root-step>
+                    <root-alter>1</root-alter>
+                  </root>
+                  <kind text="m9">minor-ninth</kind>
+                </harmony>
+                """);
+        Score score = new MusicXmlReader().read(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)));
+        Harmony harmony = (Harmony) score.parts().get(0).measures().get(0).elements().get(0);
+        assertEquals(Step.G, harmony.root().step());
+        assertEquals(1, harmony.root().alter());
+        assertEquals(HarmonyKind.MINOR_NINTH, harmony.kind());
+        assertEquals("G\u266Fm9", harmony.displayLabel());
+    }
+
+    @Test
+    void unknownHarmonyKindMapsToOther() {
+        String xml = harmonyXml("""
+                <harmony>
+                  <root>
+                    <root-step>C</root-step>
+                  </root>
+                  <kind>no-such-kind</kind>
+                </harmony>
+                """);
+        Score score = new MusicXmlReader().read(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)));
+        Harmony harmony = (Harmony) score.parts().get(0).measures().get(0).elements().get(0);
+        assertEquals(HarmonyKind.OTHER, harmony.kind());
+    }
+
+    @Test
+    void readsHarmonyIgnoringDegreeAndFunction() {
+        String xml = harmonyXml("""
+                <harmony>
+                  <root>
+                    <root-step>C</root-step>
+                    <root-alter>1</root-alter>
+                  </root>
+                  <kind text="7sus4">suspended-fourth</kind>
+                  <degree>
+                    <degree-value>7</degree-value>
+                    <degree-alter>0</degree-alter>
+                    <degree-type>add</degree-type>
+                  </degree>
+                </harmony>
+                """);
+        Score score = new MusicXmlReader().read(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)));
+        Harmony harmony = (Harmony) score.parts().get(0).measures().get(0).elements().get(0);
+        assertEquals(HarmonyKind.SUSPENDED_FOURTH, harmony.kind());
+        assertEquals("7sus4", harmony.textOverride().orElse(null));
+        assertEquals("C\u266F7sus4", harmony.displayLabel());
+    }
+
+    private static String harmonyXml(String harmonyBlock) {
+        return """
+                <?xml version=\"1.0\" encoding=\"UTF-8\"?>
+                <score-partwise version=\"4.0\">
+                  <part-list><score-part id=\"P1\"><part-name>V</part-name></score-part></part-list>
+                  <part id=\"P1\">
+                    <measure number=\"1\">
+                      <attributes>
+                        <divisions>1</divisions>
+                        <clef><sign>G</sign><line>2</line></clef>
+                      </attributes>
+                        """ + harmonyBlock + """
+                      <note>
+                        <pitch><step>C</step><octave>4</octave></pitch>
+                        <duration>1</duration>
+                        <type>quarter</type>
+                      </note>
+                    </measure>
+                  </part>
+                </score-partwise>
+                """;
+    }
+
+    @Test
+    void readsHarmonyFromBrookeWestSample() {
+        java.nio.file.Path p = findSample("BrookeWestSample.musicxml");
+        if (p == null) {
+            return; // resource not on the core test classpath — skip
+        }
+        Score score = new MusicXmlReader().read(p);
+        Harmony first = null;
+        outer:
+        for (Part part : score.parts()) {
+            for (var measure : part.measures()) {
+                for (MusicElement el : measure.elements()) {
+                    if (el instanceof Harmony h) {
+                        first = h;
+                        break outer;
+                    }
+                }
+            }
+        }
+        assertNotNull(first, "expected at least one Harmony in BrookeWestSample");
+        assertEquals(Step.B, first.root().step());
+        assertEquals(0, first.root().alter());
+        assertEquals(HarmonyKind.MAJOR_SEVENTH, first.kind());
+        assertEquals("Maj7", first.textOverride().orElse(null));
+        assertTrue(first.bass().isPresent());
+        assertEquals(Step.D, first.bass().get().step());
+        assertEquals(1, first.bass().get().alter());
     }
 
     @Test

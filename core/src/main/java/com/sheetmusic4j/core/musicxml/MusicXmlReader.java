@@ -11,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -31,6 +32,8 @@ import com.sheetmusic4j.core.model.Direction;
 import com.sheetmusic4j.core.model.DirectionType;
 import com.sheetmusic4j.core.model.Duration;
 import com.sheetmusic4j.core.model.DynamicMark;
+import com.sheetmusic4j.core.model.Harmony;
+import com.sheetmusic4j.core.model.HarmonyKind;
 import com.sheetmusic4j.core.model.KeySignature;
 import com.sheetmusic4j.core.model.Lyric;
 import com.sheetmusic4j.core.model.Measure;
@@ -338,6 +341,13 @@ public final class MusicXmlReader {
                             measure.addElement(direction);
                         }
                     }
+                    case "harmony" -> {
+                        Harmony harmony = readHarmony(reader);
+                        if (harmony != null) {
+                            flushChord(measure, pendingChord);
+                            measure.addElement(harmony);
+                        }
+                    }
                     default -> { /* backup/forward/other ignored */ }
                 }
             } else if (event == XMLStreamConstants.END_ELEMENT && "measure".equals(reader.getLocalName())) {
@@ -577,6 +587,119 @@ public final class MusicXmlReader {
             return null;
         }
         return new DirectionType.Dynamic(mark);
+    }
+
+    /**
+     * Parse a MusicXML {@code <harmony>} block into a {@link Harmony}
+     * element. Returns {@code null} when the block contains no usable data
+     * (missing root and kind). Unsupported children ({@code <degree>},
+     * {@code <function>}, {@code <frame>}) are skipped for MVP.
+     */
+    private Harmony readHarmony(XMLStreamReader reader) throws XMLStreamException {
+        Harmony.Root root = null;
+        HarmonyKind kind = null;
+        String textOverride = null;
+        Harmony.Bass bass = null;
+        while (reader.hasNext()) {
+            int event = reader.next();
+            if (event == XMLStreamConstants.START_ELEMENT) {
+                switch (reader.getLocalName()) {
+                    case "root" -> root = readRoot(reader);
+                    case "kind" -> {
+                        String attr = reader.getAttributeValue(null, "text");
+                        String body = readText(reader);
+                        kind = HarmonyKind.fromXml(body);
+                        if (attr != null && !attr.isBlank()) {
+                            textOverride = attr;
+                        }
+                    }
+                    case "bass" -> bass = readBass(reader);
+                    default -> skipElement(reader);
+                }
+            } else if (event == XMLStreamConstants.END_ELEMENT && "harmony".equals(reader.getLocalName())) {
+                break;
+            }
+        }
+        if (root == null && kind == null) {
+            return null;
+        }
+        if (root == null) {
+            // Defensive: MusicXML requires a root, but if the source omitted
+            // it we still keep the kind by anchoring to a synthetic C root.
+            root = new Harmony.Root(Step.C, 0);
+        }
+        return new Harmony(root,
+                kind != null ? kind : HarmonyKind.OTHER,
+                Optional.ofNullable(bass),
+                Optional.ofNullable(textOverride));
+    }
+
+    /**
+     * Parse the {@code <root>} child of a {@code <harmony>} element.
+     * {@code <root-step>} is mandatory; {@code <root-alter>} defaults to 0.
+     */
+    private Harmony.Root readRoot(XMLStreamReader reader) throws XMLStreamException {
+        Step step = null;
+        int alter = 0;
+        while (reader.hasNext()) {
+            int event = reader.next();
+            if (event == XMLStreamConstants.START_ELEMENT) {
+                switch (reader.getLocalName()) {
+                    case "root-step" -> {
+                        String text = readText(reader);
+                        if (text != null && !text.isEmpty()) {
+                            try {
+                                step = Step.valueOf(text.trim().toUpperCase(Locale.ROOT));
+                            } catch (IllegalArgumentException ignored) {
+                                step = null;
+                            }
+                        }
+                    }
+                    case "root-alter" -> alter = parseIntOr(readText(reader), 0);
+                    default -> skipElement(reader);
+                }
+            } else if (event == XMLStreamConstants.END_ELEMENT && "root".equals(reader.getLocalName())) {
+                break;
+            }
+        }
+        if (step == null) {
+            return null;
+        }
+        return new Harmony.Root(step, alter);
+    }
+
+    /**
+     * Parse the {@code <bass>} child of a {@code <harmony>} element.
+     * {@code <bass-step>} is mandatory; {@code <bass-alter>} defaults to 0.
+     */
+    private Harmony.Bass readBass(XMLStreamReader reader) throws XMLStreamException {
+        Step step = null;
+        int alter = 0;
+        while (reader.hasNext()) {
+            int event = reader.next();
+            if (event == XMLStreamConstants.START_ELEMENT) {
+                switch (reader.getLocalName()) {
+                    case "bass-step" -> {
+                        String text = readText(reader);
+                        if (text != null && !text.isEmpty()) {
+                            try {
+                                step = Step.valueOf(text.trim().toUpperCase(Locale.ROOT));
+                            } catch (IllegalArgumentException ignored) {
+                                step = null;
+                            }
+                        }
+                    }
+                    case "bass-alter" -> alter = parseIntOr(readText(reader), 0);
+                    default -> skipElement(reader);
+                }
+            } else if (event == XMLStreamConstants.END_ELEMENT && "bass".equals(reader.getLocalName())) {
+                break;
+            }
+        }
+        if (step == null) {
+            return null;
+        }
+        return new Harmony.Bass(step, alter);
     }
 
     private ParsedNote readNote(XMLStreamReader reader, int divisions) throws XMLStreamException {
