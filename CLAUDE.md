@@ -19,11 +19,13 @@ GroupId `com.sheetmusic4j`, parent artifactId `sheetmusic4j-parent`.
 
 ## Visual regression testing
 
-`fxdemo`'s `CompareFxViewWithPdfTest` renders a score headlessly (`HeadlessScoreImage`, using the production `Engraver` + `ScorePainter` + `AwtRenderSurface`) and compares it against a reference image via `ImageSimilarity`:
-- A deterministic "produces ink" check always runs (guards against a blank/broken render).
-- A strict pixel-similarity check against `/reference/c-major-scale.png` or `.pdf` runs only if that reference resource is present on the test classpath; otherwise it's skipped via `Assumptions.assumeTrue`. To enable it, drop a reference render into `fxdemo/src/test/resources/reference/`.
-- PDF references are rasterized via `PdfRasterizer`, which invokes PDFBox reflectively (works with either PDFBox 2.x or 3.x, or skips gracefully if PDFBox isn't on the classpath).
-- Similarity threshold is tunable via `-Dsheetmusic4j.compare.threshold=<0..1>` (default `0.6`).
+`fxdemo`'s `CompareFxViewWithReferenceTest` renders every fixture headlessly (`HeadlessScoreImage`, using the production `Engraver` + `ScorePainter` + `AwtRenderSurface`) and compares it against the sibling PDF committed next to the MusicXML fixture:
+- The sibling PDF is rasterized page-by-page via `PdfRasterizer` (PDFBox, invoked reflectively so the reference stays on the classpath transitively via `pdfviewfx`).
+- Pages are stitched vertically via `ImageStack.stackVertically(...)` into a single tall reference image, which `DiagnosticComparator` consumes unchanged.
+- Assertions are layered: PDF page count (metadata) → ink sanity → staff count → staff bounding-box ratios → per-measure similarity.
+- Fixtures without a sibling PDF are skipped via `Assumptions.assumeTrue`.
+- Rasterization DPI is tunable via `-Dsheetmusic4j.compare.pdf.dpi=<float>` (default `150`); per-measure similarity threshold via `-Dsheetmusic4j.compare.measure.threshold=<0..1>` (default `0.4`).
+- On failure a self-contained HTML report is written to `fxdemo/target/sheet4j-diff/<fixture>/report.html`.
 
 `fxdemo/src/test/resources/xmlsamples/` contains real-world MusicXML/MXL sample scores (with matching reference PDFs/PNGs for several) sourced from https://www.musicxml.com/music-in-musicxml/example-set/ — useful for exercising the reader/engraver against non-trivial scores beyond the minimal `c-major-scale.musicxml` fixture.
 
@@ -39,7 +41,7 @@ mvn -pl core -Dtest=MusicXmlReaderTest test   # run a single test class
 mvn -pl fxdemo javafx:run               # launch the JavaFX demo app
 ```
 
-CI (`.github/workflows/ci.yml`) runs `mvn verify` on JDK 26 (Temurin). The library still targets `maven.compiler.release=21`. There is no CI workflow that regenerates OSMD reference PNGs — that is a local-only step (`mvn -pl fxdemo -am -Prefresh-references test`); PNGs are committed by the developer.
+CI (`.github/workflows/ci.yml`) runs `mvn verify` on JDK 26 (Temurin). The library still targets `maven.compiler.release=21`.
 
 Release is a manual `workflow_dispatch` (`.github/workflows/release.yml`) that bumps the version with `versions:set` and runs `mvn -Prelease clean deploy` to Maven Central.
 

@@ -1,5 +1,6 @@
 package com.sheetmusic4j.fxdemo;
 
+import java.awt.Color;
 import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
 import java.io.InputStream;
@@ -7,8 +8,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
+import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.stream.Stream;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -25,31 +29,34 @@ import com.sheetmusic4j.engraving.LayoutOptions;
 import com.sheetmusic4j.engraving.LayoutResult;
 import com.sheetmusic4j.fxdemo.reference.DiagnosticComparator;
 import com.sheetmusic4j.fxdemo.reference.DiffReportWriter;
-import com.sheetmusic4j.fxdemo.reference.ReferenceCache;
+import com.sheetmusic4j.fxdemo.reference.ImageStack;
+import com.sheetmusic4j.fxdemo.reference.PdfRasterizer;
 
 /**
- * Diagnostic replacement for the old whole-image {@code CompareFxViewWithPdfTest}:
- * for every MusicXML fixture that has a committed reference PNG under
- * {@code fxdemo/src/test/resources/reference/generated/}, compare the Sheet4j
- * engraving against the reference through a series of layered assertions
- * (ink sanity, staff count, staff bounding boxes, per-measure similarity).
+ * Diagnostic comparison of the Sheet4j engraving against the sibling PDF
+ * committed next to each MusicXML fixture. Every fixture drives:
+ * <ol>
+ *   <li>A PDF metadata assertion (expected vs actual page count),</li>
+ *   <li>An ink-sanity check on the rendered image,</li>
+ *   <li>Staff-count and bounding-box checks,</li>
+ *   <li>Per-measure similarity against the vertically-stitched PDF pages.</li>
+ * </ol>
  *
- * <p>When no reference is present (which is the case on a fresh checkout unless
- * {@code mvn -pl fxdemo -Prefresh-references test} has been run), the test is
- * skipped via {@link Assumptions}, so this class stays green in CI without any
- * network access.
+ * <p>When a fixture has no sibling PDF, or PDFBox is not on the classpath,
+ * the parametrized invocation is skipped via {@link Assumptions} so the
+ * suite stays green in restricted environments.
  *
  * <p>On failure, a self-contained HTML report is written under
- * {@code target/sheet4j-diff/&lt;fixture&gt;/report.html} and its path is
- * printed in the assertion message.
+ * {@code target/sheet4j-diff/&lt;fixture&gt;/report.html}.
  */
 class CompareFxViewWithReferenceTest {
 
     private static final int WIDTH = 1000;
     private static final int HEIGHT = 300;
 
-    private static final Path REFERENCE_DIR =
-            Paths.get("src", "test", "resources", "reference", "generated");
+    private static final float PDF_DPI =
+            (float) Double.parseDouble(
+                    System.getProperty("sheetmusic4j.compare.pdf.dpi", "150"));
 
     private static final double MIN_INK = 0.001;
     private static final double MIN_PER_MEASURE_SIMILARITY =
@@ -61,52 +68,60 @@ class CompareFxViewWithReferenceTest {
     }
 
     /**
-     * Fixture ladder for the diagnostic comparator. To add a new fixture:
-     * <ol>
-     *   <li>drop the OSMD-generated reference PNG at
-     *       {@code fxdemo/src/test/resources/reference/generated/&lt;basename&gt;.png}
-     *       (typically by running {@code mvn -pl fxdemo -Prefresh-references test}),</li>
-     *   <li>add an {@code Arguments.of(basename, path)} line below.</li>
-     * </ol>
-     * When a reference PNG is missing, the corresponding parameterised invocation
-     * skips gracefully via {@link Assumptions}.
+     * Fixture ladder for the diagnostic comparator. Every entry is
+     * {@code (basename, xmlPath, expectedPageCount)}; the test skips when the
+     * sibling {@code .pdf} is absent. Page counts were captured directly from
+     * the committed PDFs via PDFBox.
      */
     static Stream<Arguments> fixtures() {
-        Path resourcesRoot = Paths.get("src", "test", "resources");
-        Path samples = resourcesRoot.resolve("xmlsamples");
+        Path samples = Paths.get("src", "test", "resources", "xmlsamples");
         return Stream.of(
-                Arguments.of("c-major-scale", resourcesRoot.resolve("c-major-scale.musicxml")),
-                Arguments.of("Saltarello", samples.resolve("Saltarello.musicxml")),
-                Arguments.of("Telemann", samples.resolve("Telemann.musicxml")),
-                Arguments.of("Echigo-Jishi", samples.resolve("Echigo-Jishi.musicxml")),
-                Arguments.of("Dichterliebe01", samples.resolve("Dichterliebe01.musicxml")),
-                Arguments.of("MozartPianoSonata", samples.resolve("MozartPianoSonata.musicxml")),
-                Arguments.of("MozartTrio", samples.resolve("MozartTrio.musicxml"))
+                Arguments.of("ActorPreludeSample", samples.resolve("ActorPreludeSample.musicxml"), 4),
+                Arguments.of("BeetAnGeSample", samples.resolve("BeetAnGeSample.musicxml"), 1),
+                Arguments.of("BrahWiMeSample", samples.resolve("BrahWiMeSample.musicxml"), 1),
+                Arguments.of("BrookeWestSample", samples.resolve("BrookeWestSample.musicxml"), 1),
+                Arguments.of("DebuMandSample", samples.resolve("DebuMandSample.musicxml"), 1),
+                Arguments.of("Dichterliebe01", samples.resolve("Dichterliebe01.musicxml"), 2),
+                Arguments.of("Echigo-Jishi", samples.resolve("Echigo-Jishi.musicxml"), 1),
+                Arguments.of("FaurReveSample", samples.resolve("FaurReveSample.musicxml"), 1),
+                Arguments.of("MahlFaGe4Sample", samples.resolve("MahlFaGe4Sample.musicxml"), 1),
+                Arguments.of("MozaChloSample", samples.resolve("MozaChloSample.musicxml"), 1),
+                Arguments.of("MozaVeilSample", samples.resolve("MozaVeilSample.musicxml"), 1),
+                Arguments.of("SchbAvMaSample", samples.resolve("SchbAvMaSample.musicxml"), 1)
         );
     }
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("fixtures")
-    void engravingMatchesReference(String name, Path xmlPath) throws Exception {
-        Path reference = REFERENCE_DIR.resolve(name + ".png");
-        Assumptions.assumeTrue(Files.isRegularFile(reference),
-                "No reference PNG at " + reference.toAbsolutePath()
-                        + " - run `mvn -pl fxdemo -Prefresh-references test` to generate one.");
+    void engravingMatchesReference(String name, Path xmlPath, int expectedPages) throws Exception {
+        Path pdf = PdfSibling.existingPathFor(xmlPath).orElse(null);
+        Assumptions.assumeTrue(pdf != null,
+                "No sibling PDF for " + xmlPath + " - skipping.");
+
+        OptionalInt actualPageCount = PdfRasterizer.pageCount(pdf);
+        Assumptions.assumeTrue(actualPageCount.isPresent(),
+                "PDFBox unavailable; skipping.");
+        assertEquals(expectedPages, actualPageCount.getAsInt(),
+                "PDF page count mismatch for " + name);
+
+        Optional<List<BufferedImage>> pages = PdfRasterizer.rasterizeAllPages(pdf, PDF_DPI);
+        Assumptions.assumeTrue(pages.isPresent(),
+                "Could not rasterize " + pdf + " - skipping.");
+        BufferedImage referenceImage = ImageStack.stackVertically(
+                pages.get(), 8, Color.WHITE);
 
         Score score = loadScore(xmlPath);
         BufferedImage rendered = HeadlessScoreImage.render(score, WIDTH, HEIGHT);
         double ink = ImageSimilarity.inkRatio(rendered);
         assertTrue(ink > MIN_INK, "rendered score should not be blank, ink ratio was " + ink);
 
-        BufferedImage referenceImage = new ReferenceCache(REFERENCE_DIR).load(name)
-                .orElseThrow(() -> new IllegalStateException("Reference PNG could not be loaded: " + reference));
-
         LayoutResult layout = new Engraver().layout(score, layoutOptions());
         DiagnosticComparator.Diagnostic diagnostic =
                 new DiagnosticComparator().compare(rendered, referenceImage, layout);
 
         Path reportDir = Paths.get("target", "sheet4j-diff", name);
-        Path report = DiffReportWriter.write(reportDir, name, rendered, referenceImage, diagnostic);
+        Path report = DiffReportWriter.write(reportDir, name, rendered, referenceImage,
+                actualPageCount.getAsInt(), diagnostic);
 
         try {
             assertStaffCount(diagnostic);
@@ -131,7 +146,6 @@ class CompareFxViewWithReferenceTest {
         for (int i = 0; i < compare; i++) {
             Rectangle r = rendered.get(i);
             Rectangle ref = reference.get(i);
-            // Heights should be within an order of magnitude of each other.
             double ratio = ref.height / (double) Math.max(1, r.height);
             assertTrue(ratio > 0.25 && ratio < 4.0,
                     "staff " + i + " height ratio out of range: rendered=" + r.height
@@ -169,7 +183,6 @@ class CompareFxViewWithReferenceTest {
     }
 
     private Score loadScore(Path xmlPath) throws Exception {
-        // Prefer classpath (works from IDE) with filesystem fallback.
         String cp = "/" + xmlPath.getFileName();
         try (InputStream in = getClass().getResourceAsStream(cp)) {
             if (in != null) {

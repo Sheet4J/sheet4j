@@ -1,6 +1,5 @@
 package com.sheetmusic4j.fxdemo.reference;
 
-import javax.imageio.ImageIO;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
@@ -8,9 +7,15 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import javax.imageio.ImageIO;
+
 /**
  * Writes a self-contained HTML report showing the rendered Sheet4j engraving
  * side by side with the reference image and the per-measure diagnostic table.
+ *
+ * <p>The reference image is obtained by rasterizing the sibling PDF of the
+ * fixture (see {@link PdfRasterizer#rasterizeAllPages(java.nio.file.Path, float)})
+ * and stitching all pages vertically via {@link ImageStack#stackVertically}.
  *
  * <p>The report layout deliberately keeps everything (CSS, PNG paths) inside the
  * output directory so that a developer can just double-click {@code report.html}
@@ -24,16 +29,19 @@ public final class DiffReportWriter {
     /**
      * Write a diff report and return the path to the produced HTML file.
      *
-     * @param outputDir  directory where {@code rendered.png}, {@code reference.png},
-     *                   {@code diff.png} and {@code report.html} are written
-     * @param name       fixture name (used only in the report header)
-     * @param rendered   the Sheet4j-rendered image
-     * @param reference  the reference image
-     * @param diagnostic the diagnostic to summarize in the report
+     * @param outputDir           directory where {@code rendered.png}, {@code reference.png},
+     *                            {@code diff.png} and {@code report.html} are written
+     * @param name                fixture name (used only in the report header)
+     * @param rendered            the Sheet4j-rendered image
+     * @param reference           the reference image
+     * @param referencePageCount  number of PDF pages the reference was stitched from
+     *                            (0 or negative to omit the count from the caption)
+     * @param diagnostic          the diagnostic to summarize in the report
      * @return path to the generated {@code report.html} file
      * @throws IOException if the output directory or report files cannot be written
      */
     public static Path write(Path outputDir, String name, BufferedImage rendered, BufferedImage reference,
+                             int referencePageCount,
                              DiagnosticComparator.Diagnostic diagnostic) throws IOException {
         Files.createDirectories(outputDir);
 
@@ -74,7 +82,7 @@ public final class DiffReportWriter {
 
         sb.append("<div class=\"row\">\n")
                 .append("  <div class=\"pane\"><h3>Sheet4j rendering</h3><img src=\"rendered.png\"></div>\n")
-                .append("  <div class=\"pane\"><h3>Reference (OSMD)</h3><img src=\"reference.png\"></div>\n")
+                .append("  <div class=\"pane\"><h3>").append(escape(referenceCaption(referencePageCount))).append("</h3><img src=\"reference.png\"></div>\n")
                 .append("  <div class=\"pane\"><h3>Absolute pixel diff</h3><img src=\"diff.png\"></div>\n")
                 .append("</div>\n");
 
@@ -102,6 +110,13 @@ public final class DiffReportWriter {
         sb.append("</body></html>\n");
         Files.writeString(html, sb.toString());
         return html;
+    }
+
+    private static String referenceCaption(int referencePageCount) {
+        if (referencePageCount >= 1) {
+            return "Reference (PDF, " + referencePageCount + " page(s) stitched)";
+        }
+        return "Reference (PDF)";
     }
 
     private static BufferedImage buildDiffMap(BufferedImage a, BufferedImage b) {

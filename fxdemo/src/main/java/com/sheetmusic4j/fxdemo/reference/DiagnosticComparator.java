@@ -1,19 +1,20 @@
 package com.sheetmusic4j.fxdemo.reference;
 
+import java.awt.Rectangle;
+import java.awt.image.BufferedImage;
+import java.util.ArrayList;
+import java.util.List;
+
 import com.sheetmusic4j.engraving.GlyphPlacement;
 import com.sheetmusic4j.engraving.LayoutResult;
 import com.sheetmusic4j.engraving.MeasureLayout;
 import com.sheetmusic4j.engraving.StaffLayout;
 import com.sheetmusic4j.fxdemo.ImageSimilarity;
 
-import java.awt.Rectangle;
-import java.awt.image.BufferedImage;
-import java.util.ArrayList;
-import java.util.List;
-
 /**
  * Performs a step-by-step comparison of a Sheet4j engraving against a reference
- * image (typically produced by {@link WebViewReferenceRenderer}).
+ * image (typically the vertically-stitched pages of the sibling PDF, rasterized
+ * via {@link PdfRasterizer}).
  *
  * <p>The comparator produces a {@link Diagnostic} record which carries:
  * <ul>

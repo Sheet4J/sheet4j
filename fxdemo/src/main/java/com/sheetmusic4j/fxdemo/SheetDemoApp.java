@@ -1,5 +1,6 @@
 package com.sheetmusic4j.fxdemo;
 
+import java.awt.Color;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStream;
@@ -7,6 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
 
 import com.dlsc.pdfviewfx.PDFView;
 import com.sheetmusic4j.core.io.ScoreFile;
@@ -16,7 +18,8 @@ import com.sheetmusic4j.engraving.LayoutOptions;
 import com.sheetmusic4j.engraving.LayoutResult;
 import com.sheetmusic4j.fxdemo.reference.DiagnosticComparator;
 import com.sheetmusic4j.fxdemo.reference.DiffReportWriter;
-import com.sheetmusic4j.fxdemo.reference.WebViewReferenceRenderer;
+import com.sheetmusic4j.fxdemo.reference.ImageStack;
+import com.sheetmusic4j.fxdemo.reference.PdfRasterizer;
 import com.sheetmusic4j.fxviewer.SheetView;
 
 import javafx.application.Application;
@@ -46,13 +49,17 @@ import javafx.stage.Stage;
 /**
  * Standalone demo/testbed for the Sheet4j {@link SheetView}. Provides a File menu
  * to open MusicXML/MIDI scores, a live rendering area, a debug panel, an
- * optional PDF-companion pane, and an on-demand "Diff" pane that renders a
- * MusicXML reference via WebView + OSMD and shows the diagnostic report.
+ * optional PDF-companion pane, and a "Diff" pane that compares the Sheet4j
+ * engraving against the rasterized sibling PDF.
  */
 public final class SheetDemoApp extends Application {
 
     private static final int DIFF_WIDTH = 1000;
     private static final int DIFF_HEIGHT = 300;
+
+    private static final float PDF_DPI =
+            (float) Double.parseDouble(
+                    System.getProperty("sheetmusic4j.compare.pdf.dpi", "150"));
 
     private final SheetView sheetView = new SheetView();
     private final PDFView pdfView = new PDFView();
@@ -60,8 +67,8 @@ public final class SheetDemoApp extends Application {
     private final Label statusLabel = new Label("Ready.");
 
     private final WebView diffWebView = new WebView();
-    private final Label diffStatus = new Label("Open a MusicXML file and click 'Generate reference'.");
-    private final Button generateReferenceButton = new Button("Generate reference (OSMD)");
+    private final Label diffStatus = new Label("Open a MusicXML file with a sibling PDF and click 'Compare against PDF'.");
+    private final Button generateReferenceButton = new Button("Compare against PDF");
 
     private SplitPane split;
     private BorderPane pdfPane;
@@ -158,11 +165,12 @@ public final class SheetDemoApp extends Application {
 
     private BorderPane buildDiffPane() {
         generateReferenceButton.setOnAction(e -> generateReferenceAsync());
+        generateReferenceButton.setDisable(true);
         HBox toolbar = new HBox(8, generateReferenceButton, diffStatus);
         toolbar.setPadding(new Insets(4));
 
         BorderPane pane = new BorderPane(diffWebView);
-        pane.setTop(new javafx.scene.layout.VBox(sectionTitle("Diff (Sheet4j vs OSMD reference)"), toolbar));
+        pane.setTop(new javafx.scene.layout.VBox(sectionTitle("Diff (Sheet4j vs sibling PDF)"), toolbar));
         return pane;
     }
 
@@ -197,7 +205,10 @@ public final class SheetDemoApp extends Application {
             showPdf(pdf);
             updateDebug(score, pdf);
             stage.setTitle("Sheet4j Demo - " + path.getFileName());
-            diffStatus.setText("Click 'Generate reference' to run OSMD on this score.");
+            generateReferenceButton.setDisable(pdf.isEmpty());
+            diffStatus.setText(pdf.isPresent()
+                    ? "Click 'Compare against PDF' to render the diff report."
+                    : "No sibling PDF for this score - diff disabled.");
             statusLabel.setText("Loaded: " + path.toAbsolutePath()
                     + (pdf.isPresent() ? "  (PDF: " + pdf.get().getFileName() + ")" : ""));
         } catch (RuntimeException ex) {
@@ -246,30 +257,35 @@ public final class SheetDemoApp extends Application {
             diffStatus.setText("Open a MusicXML file first.");
             return;
         }
+        Optional<Path> pdf = PdfSibling.existingPathFor(currentFile);
+        if (pdf.isEmpty()) {
+            diffStatus.setText("No sibling PDF for this score.");
+            return;
+        }
         showDiffTab();
         generateReferenceButton.setDisable(true);
-        diffStatus.setText("Rendering reference in headless WebView...");
+        diffStatus.setText("Rasterizing sibling PDF...");
 
         String fileName = currentFile.getFileName().toString();
-        Path xmlPath = currentFile;
+        Path pdfPath = pdf.get();
         Score score = currentScore;
 
         Task<Path> task = new Task<>() {
             @Override
             protected Path call() throws Exception {
-                String musicXml = Files.readString(xmlPath);
-                WebViewReferenceRenderer.Result result =
-                        new WebViewReferenceRenderer().render(musicXml, DIFF_WIDTH, DIFF_HEIGHT);
-                if (result.missing()) {
+                OptionalInt count = PdfRasterizer.pageCount(pdfPath);
+                if (count.isEmpty()) {
                     throw new IllegalStateException(
-                            "OSMD bundle not committed. See fxdemo/src/test/resources/reference/osmd/README.md");
+                            "PDFBox unavailable; cannot rasterize " + pdfPath);
                 }
-                if (!result.isSuccess()) {
-                    throw new IllegalStateException("OSMD render failed: " + result.errorMsg());
+                Optional<List<BufferedImage>> pages =
+                        PdfRasterizer.rasterizeAllPages(pdfPath, PDF_DPI);
+                if (pages.isEmpty()) {
+                    throw new IllegalStateException("Failed to rasterize " + pdfPath);
                 }
+                BufferedImage reference = ImageStack.stackVertically(pages.get(), 8, Color.WHITE);
 
                 BufferedImage rendered = HeadlessScoreImage.render(score, DIFF_WIDTH, DIFF_HEIGHT);
-                BufferedImage reference = result.image();
                 LayoutResult layout = new Engraver().layout(score, layoutOptions());
                 DiagnosticComparator.Diagnostic diagnostic =
                         new DiagnosticComparator().compare(rendered, reference, layout);
@@ -277,7 +293,7 @@ public final class SheetDemoApp extends Application {
                 Path outDir = Path.of(System.getProperty("java.io.tmpdir"), "sheet4j-diff",
                         stripExtension(fileName));
                 return DiffReportWriter.write(outDir, stripExtension(fileName),
-                        rendered, reference, diagnostic);
+                        rendered, reference, count.getAsInt(), diagnostic);
             }
         };
         task.setOnSucceeded(e -> {
@@ -328,6 +344,7 @@ public final class SheetDemoApp extends Application {
         updateDebug(null, Optional.empty());
         stage.setTitle("Sheet4j Demo");
         statusLabel.setText("Closed.");
+        generateReferenceButton.setDisable(true);
     }
 
     private void updateDebug(Score score, Optional<Path> pdf) {
@@ -346,7 +363,7 @@ public final class SheetDemoApp extends Application {
                 A JavaFX testbed for the Sheet4j sheet-music rendering library.
                 Open MusicXML or MIDI files to preview how they are engraved.
                 A companion PDF (same file name) is shown side by side when present.
-                Use View -> Show Diff tab to compare against an OSMD reference.""");
+                Use View -> Show Diff tab to compare against the sibling PDF.""");
         alert.showAndWait();
     }
 

@@ -58,7 +58,7 @@
             <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
-        </dependencies>
+    </dependencies>
 
     <build>
         <plugins>
@@ -69,67 +69,6 @@
                     <mainClass>${exec.mainClass}</mainClass>
                 </configuration>
             </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-surefire-plugin</artifactId>
-                <configuration>
-                    <!--
-                        The default test run must not open a WebView: the "reference-generation"
-                        tag identifies tests that boot a headless JavaFX WebView + OSMD to
-                        regenerate expected images. Those are triggered explicitly via the
-                        "refresh-references" profile.
-                    -->
-                    <excludedGroups>reference-generation</excludedGroups>
-                </configuration>
-            </plugin>
         </plugins>
     </build>
-
-    <profiles>
-        <profile>
-            <!--
-                Regenerate the reference PNGs used by the diagnostic comparator.
-                Local-only: needs a working JavaFX + WebView (native macOS / Windows,
-                or Linux with a display / Xvfb). Do NOT wire this into CI.
-
-                Usage:
-                    mvn -pl fxdemo -am -Prefresh-references test
-            -->
-            <id>refresh-references</id>
-            <build>
-                <plugins>
-                    <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-surefire-plugin</artifactId>
-                        <configuration>
-                            <!--
-                                combine.self="override" is required: without it, an
-                                empty child element MERGES with (does not replace)
-                                the parent's <excludedGroups>reference-generation</...>,
-                                so JUnit ends up including AND excluding the same
-                                tag and Tests run: 0 silently.
-                            -->
-                            <excludedGroups combine.self="override"></excludedGroups>
-                            <groups>reference-generation</groups>
-                            <!--
-                                Fail loudly when the tag filter accidentally
-                                matches nothing (regression guard for the merge
-                                bug we just fixed).
-                            -->
-                            <failIfNoTests>true</failIfNoTests>
-                            <systemPropertyVariables>
-                                <sheetmusic4j.reference.regenerate>true</sheetmusic4j.reference.regenerate>
-                                <!--
-                                    Force software Prism to keep PNG output stable
-                                    across GPU drivers. Do NOT set glass.platform
-                                    or monocle.platform: Monocle cannot host WebView.
-                                -->
-                                <prism.order>sw</prism.order>
-                            </systemPropertyVariables>
-                        </configuration>
-                    </plugin>
-                </plugins>
-            </build>
-        </profile>
-    </profiles>
 </project>
