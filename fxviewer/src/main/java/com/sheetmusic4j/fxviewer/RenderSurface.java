@@ -31,6 +31,24 @@ public interface RenderSurface {
     /** Strokes the outline of an axis-aligned oval. */
     void strokeOval(double x, double y, double width, double height);
 
+    /**
+     * Strokes the outline of an axis-aligned rectangle. The default
+     * implementation composes the outline from four {@link #strokeLine
+     * strokeLine} calls; backends that support a native rectangle stroke
+     * (JavaFX / AWT) should override for better rendering quality.
+     *
+     * @param x      top-left x
+     * @param y      top-left y
+     * @param width  width of the rectangle
+     * @param height height of the rectangle
+     */
+    default void strokeRect(double x, double y, double width, double height) {
+        strokeLine(x, y, x + width, y);
+        strokeLine(x + width, y, x + width, y + height);
+        strokeLine(x + width, y + height, x, y + height);
+        strokeLine(x, y + height, x, y);
+    }
+
     /** Draws text with the current stroke/fill settings. */
     void strokeText(String text, double x, double y);
 
