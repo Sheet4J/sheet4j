@@ -13,6 +13,7 @@ import com.sheetmusic4j.core.model.Clef;
 import com.sheetmusic4j.core.model.ClefSign;
 import com.sheetmusic4j.core.model.Creator;
 import com.sheetmusic4j.core.model.KeySignature;
+import com.sheetmusic4j.core.model.Lyric;
 import com.sheetmusic4j.core.model.Measure;
 import com.sheetmusic4j.core.model.MusicElement;
 import com.sheetmusic4j.core.model.Note;
@@ -59,6 +60,23 @@ public final class Engraver {
      */
     private static final int MIDDLE_LINE_STAFF_STEP = 4;
     private static final double STEM_LENGTH_GAPS = 3.5;
+
+    /**
+     * Additional vertical space (in staff-line gaps) reserved below the last
+     * staff of a part when that part carries at least one verse-1 lyric.
+     */
+    private static final double LYRIC_RESERVE_GAPS = 3.2;
+
+    /**
+     * Multiplier applied to the staff-line gap to derive the lyric font size.
+     */
+    private static final double LYRIC_FONT_SIZE_GAPS = 1.4;
+
+    /**
+     * Distance (in staff-line gaps) from the bottom staff line to the baseline
+     * of the verse-1 lyric row.
+     */
+    private static final double LYRIC_BASELINE_OFFSET_GAPS = 2.2;
 
     public LayoutResult layout(Score score, LayoutOptions options) {
         List<TextPlacement> texts = new ArrayList<>();
@@ -108,9 +126,12 @@ public final class Engraver {
                 for (int staffIdx = 0; staffIdx < p.staveCount(); staffIdx++) {
                     StaffLayout sl = layoutStaffRow(
                             p, staffIdx, options.leftMargin(), staffTop,
-                            options, start, endExclusive, rowWidths, rowIdx == 0);
+                            options, start, endExclusive, rowWidths, rowIdx == 0, texts);
                     stavesForRow.add(sl);
                     staffTop += options.staffHeight() + options.staffSpacing();
+                }
+                if (p.hasLyrics()) {
+                    staffTop += options.staffLineGap() * LYRIC_RESERVE_GAPS;
                 }
             }
             systems.add(new SystemLayout(0, y, options.systemWidth(), stavesForRow));
@@ -204,14 +225,21 @@ public final class Engraver {
         private final Clef[][] clefsPerMeasure; // [measureIndex][staffIndex]
         private final KeySignature[] keyPerMeasure;
         private final TimeSignature[] timePerMeasure;
+        private final boolean hasLyrics;
 
         private PartInfo(Part part, int staveCount,
-                         Clef[][] clefs, KeySignature[] keys, TimeSignature[] times) {
+                         Clef[][] clefs, KeySignature[] keys, TimeSignature[] times,
+                         boolean hasLyrics) {
             this.part = part;
             this.staveCount = staveCount;
             this.clefsPerMeasure = clefs;
             this.keyPerMeasure = keys;
             this.timePerMeasure = times;
+            this.hasLyrics = hasLyrics;
+        }
+
+        boolean hasLyrics() {
+            return hasLyrics;
         }
 
         Part part() {
@@ -310,9 +338,46 @@ public final class Engraver {
                 keys[idx] = currentKey;
                 times[idx] = currentTime;
             }
-            return new PartInfo(part, staveCount, clefs, keys, times);
-        }
-    }
+            return new PartInfo(part, staveCount, clefs, keys, times, scanHasLyrics(part));
+            }
+
+            /**
+            * Whether the part contains at least one verse-1 lyric with non-empty
+            * text, on any note (including the primary member of a chord).
+            */
+            private static boolean scanHasLyrics(Part part) {
+            for (Measure measure : part.measures()) {
+                for (MusicElement element : measure.elements()) {
+                    Note note = lyricCarrier(element);
+                    if (note == null) {
+                        continue;
+                    }
+                    for (Lyric lyric : note.lyrics()) {
+                        if (lyric.verse() == 1 && !lyric.text().isEmpty()) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+            }
+            }
+
+            /**
+            * Extract the lyric-carrying note from a measure element. For a plain
+            * {@link Note} that is the note itself; for a {@link Chord} MusicXML
+            * convention puts lyrics on the primary (first) note; rests do not
+            * carry lyrics.
+            */
+            private static Note lyricCarrier(MusicElement element) {
+            if (element instanceof Note note) {
+            return note;
+            }
+            if (element instanceof Chord chord && !chord.notes().isEmpty()) {
+            return chord.notes().get(0);
+            }
+            return null;
+            }
 
     /**
      * Number of staves declared by the first measure of the part that carries an
@@ -536,7 +601,7 @@ public final class Engraver {
     private StaffLayout layoutStaffRow(PartInfo partInfo, int staffIdx, double x, double y,
                                        LayoutOptions options,
                                        int start, int endExclusive, List<Double> rowWidths,
-                                       boolean firstRow) {
+                                       boolean firstRow, List<TextPlacement> texts) {
         Part part = partInfo.part();
         int staveCount = partInfo.staveCount();
         int staffNumber = staffIdx + 1;
@@ -586,6 +651,9 @@ public final class Engraver {
             for (MusicElement element : elements) {
                 placeElement(glyphs, beams, ties, openBeams, tieCandidates,
                         element, noteX, y, currentClef, options);
+                if (staffIdx == 0) {
+                    placeLyrics(texts, element, noteX, y, options);
+                }
                 noteX += step;
             }
 
@@ -710,6 +778,47 @@ public final class Engraver {
                 glyphs.add(new GlyphPlacement(dx, y, Glyph.AUG_DOT, restStep));
             }
         }
+    }
+
+    /**
+     * Emit lyric {@link TextPlacement}s for the given measure element. Only
+     * verse-1 lyrics are rendered in the current MVP scope; verses &gt;= 2 are
+     * captured in the model but not drawn.
+     */
+    private static void placeLyrics(List<TextPlacement> texts, MusicElement element,
+                                    double noteX, double staffY, LayoutOptions options) {
+        Note note = lyricCarrier(element);
+        if (note == null || note.lyrics().isEmpty()) {
+            return;
+        }
+        double gap = options.staffLineGap();
+        double fontSize = gap * LYRIC_FONT_SIZE_GAPS;
+        double baselineY = staffY + options.staffHeight()
+                + gap * LYRIC_BASELINE_OFFSET_GAPS + fontSize;
+        for (Lyric lyric : note.lyrics()) {
+            if (lyric.verse() != 1) {
+                continue;
+            }
+            String text = lyric.text();
+            if (text.isEmpty()) {
+                continue;
+            }
+            String rendered = text + syllabicSuffix(lyric.syllabic());
+            texts.add(new TextPlacement(rendered, noteX, baselineY, fontSize,
+                    TextPlacement.Align.CENTER, TextPlacement.Category.LYRIC));
+        }
+    }
+
+    /**
+     * Trailing character appended to a syllable's rendered text to signal a
+     * mid-word hyphenation. A proper centered hyphen glyph between adjacent
+     * syllables is a follow-up refinement.
+     */
+    private static String syllabicSuffix(com.sheetmusic4j.core.model.Syllabic syllabic) {
+        return switch (syllabic) {
+            case BEGIN, MIDDLE -> "-";
+            case SINGLE, END -> "";
+        };
     }
 
     /**

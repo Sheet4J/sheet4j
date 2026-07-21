@@ -137,7 +137,11 @@ public final class SheetDemoApp extends Application {
         showCreators.setSelected(true);
         showCreators.setOnAction(e -> toggleTextCategories(showCreators.isSelected(),
                 TextPlacement.Category.CREATOR));
-        textMenu.getItems().addAll(showTitles, showCreators);
+        CheckMenuItem showLyrics = new CheckMenuItem("Show lyrics");
+        showLyrics.setSelected(true);
+        showLyrics.setOnAction(e -> toggleTextCategories(showLyrics.isSelected(),
+                TextPlacement.Category.LYRIC));
+        textMenu.getItems().addAll(showTitles, showCreators, showLyrics);
         viewMenu.getItems().add(textMenu);
 
         Menu helpMenu = new Menu("Help");

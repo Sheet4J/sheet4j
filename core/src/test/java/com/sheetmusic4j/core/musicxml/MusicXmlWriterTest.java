@@ -8,11 +8,20 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import org.junit.jupiter.api.Test;
 
+import com.sheetmusic4j.core.model.Attributes;
+import com.sheetmusic4j.core.model.Clef;
 import com.sheetmusic4j.core.model.Creator;
+import com.sheetmusic4j.core.model.Duration;
+import com.sheetmusic4j.core.model.Lyric;
+import com.sheetmusic4j.core.model.Measure;
 import com.sheetmusic4j.core.model.MusicElement;
 import com.sheetmusic4j.core.model.Note;
+import com.sheetmusic4j.core.model.NoteType;
 import com.sheetmusic4j.core.model.Part;
+import com.sheetmusic4j.core.model.Pitch;
 import com.sheetmusic4j.core.model.Score;
+import com.sheetmusic4j.core.model.Step;
+import com.sheetmusic4j.core.model.Syllabic;
 
 class MusicXmlWriterTest {
 
@@ -67,12 +76,70 @@ class MusicXmlWriterTest {
         assertEquals(original.creators(), reparsed.creators());
     }
 
+    @Test
+    void roundTripPreservesLyrics() {
+        int divisions = 1;
+        Note note = Note.builder()
+                .pitch(new Pitch(Step.C, 4))
+                .duration(new Duration(1, divisions))
+                .type(NoteType.QUARTER)
+                .addLyric(new Lyric("La", Syllabic.SINGLE, 1))
+                .build();
+        Measure measure = Measure.builder(1)
+                .attributes(Attributes.builder()
+                        .divisions(divisions)
+                        .clef(Clef.treble())
+                        .build())
+                .addElement(note)
+                .build();
+        Score original = Score.builder()
+                .addPart(Part.builder("P1").name("V").addMeasure(measure).build())
+                .build();
+
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        new MusicXmlWriter().write(original, out);
+        Score reparsed = new MusicXmlReader().read(new ByteArrayInputStream(out.toByteArray()));
+
+        Note reparsedNote = (Note) reparsed.parts().get(0).measures().get(0).elements().get(0);
+        assertEquals(1, reparsedNote.lyrics().size());
+        assertEquals(new Lyric("La", Syllabic.SINGLE, 1), reparsedNote.lyrics().get(0));
+    }
+
+    @Test
+    void roundTripPreservesMultipleLyricVerses() {
+        int divisions = 1;
+        Note note = Note.builder()
+                .pitch(new Pitch(Step.D, 4))
+                .duration(new Duration(1, divisions))
+                .type(NoteType.QUARTER)
+                .addLyric(new Lyric("Ma", Syllabic.BEGIN, 1))
+                .addLyric(new Lyric("Le", Syllabic.SINGLE, 2))
+                .build();
+        Measure measure = Measure.builder(1)
+                .attributes(Attributes.builder().divisions(divisions).clef(Clef.treble()).build())
+                .addElement(note)
+                .build();
+        Score original = Score.builder()
+                .addPart(Part.builder("P1").name("V").addMeasure(measure).build())
+                .build();
+
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        new MusicXmlWriter().write(original, out);
+        Score reparsed = new MusicXmlReader().read(new ByteArrayInputStream(out.toByteArray()));
+
+        Note reparsedNote = (Note) reparsed.parts().get(0).measures().get(0).elements().get(0);
+        assertEquals(2, reparsedNote.lyrics().size());
+        assertEquals(new Lyric("Ma", Syllabic.BEGIN, 1), reparsedNote.lyrics().get(0));
+        assertEquals(new Lyric("Le", Syllabic.SINGLE, 2), reparsedNote.lyrics().get(1));
+    }
+
     private void assertSameElement(MusicElement a, MusicElement b) {
         assertEquals(a.getClass(), b.getClass());
         assertEquals(a.duration().value(), b.duration().value());
         if (a instanceof Note na && b instanceof Note nb) {
             assertEquals(na.pitch(), nb.pitch());
             assertEquals(na.type(), nb.type());
+            assertEquals(na.lyrics(), nb.lyrics());
         }
     }
-}
+    }

@@ -20,6 +20,7 @@ import com.sheetmusic4j.core.model.Chord;
 import com.sheetmusic4j.core.model.Clef;
 import com.sheetmusic4j.core.model.Creator;
 import com.sheetmusic4j.core.model.KeySignature;
+import com.sheetmusic4j.core.model.Lyric;
 import com.sheetmusic4j.core.model.Measure;
 import com.sheetmusic4j.core.model.MusicElement;
 import com.sheetmusic4j.core.model.Note;
@@ -207,6 +208,12 @@ public final class MusicXmlWriter {
             }
             for (Beam beam : note.beams()) {
                 w.startBeam(beam.number(), beam.state().xmlValue());
+            }
+            for (Lyric lyric : note.lyrics()) {
+                w.start("lyric", "number", Integer.toString(lyric.verse()));
+                w.textElement("syllabic", lyric.syllabic().xmlValue());
+                w.textElement("text", lyric.text());
+                w.end("lyric");
             }
             w.end("note");
         } catch (XMLStreamException e) {

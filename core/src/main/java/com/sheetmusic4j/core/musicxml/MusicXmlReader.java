@@ -29,6 +29,7 @@ import com.sheetmusic4j.core.model.ClefSign;
 import com.sheetmusic4j.core.model.Creator;
 import com.sheetmusic4j.core.model.Duration;
 import com.sheetmusic4j.core.model.KeySignature;
+import com.sheetmusic4j.core.model.Lyric;
 import com.sheetmusic4j.core.model.Measure;
 import com.sheetmusic4j.core.model.Note;
 import com.sheetmusic4j.core.model.NoteType;
@@ -37,6 +38,7 @@ import com.sheetmusic4j.core.model.Pitch;
 import com.sheetmusic4j.core.model.Rest;
 import com.sheetmusic4j.core.model.Score;
 import com.sheetmusic4j.core.model.Step;
+import com.sheetmusic4j.core.model.Syllabic;
 import com.sheetmusic4j.core.model.TimeSignature;
 
 /**
@@ -429,6 +431,7 @@ public final class MusicXmlReader {
         Accidental accidental = null;
         int staff = 1;
         java.util.List<Beam> beams = new ArrayList<>();
+        java.util.List<Lyric> lyrics = new ArrayList<>();
 
         while (reader.hasNext()) {
             int event = reader.next();
@@ -448,6 +451,12 @@ public final class MusicXmlReader {
                         int number = parseIntOr(reader.getAttributeValue(null, "number"), 1);
                         Beam.State state = Beam.State.fromXml(readText(reader));
                         beams.add(new Beam(number, state));
+                    }
+                    case "lyric" -> {
+                        Lyric lyric = readLyric(reader);
+                        if (lyric != null) {
+                            lyrics.add(lyric);
+                        }
                     }
                     case "tie" -> {
                         String tieType = reader.getAttributeValue(null, "type");
@@ -480,7 +489,8 @@ public final class MusicXmlReader {
                 .tieStart(tieStart)
                 .tieStop(tieStop)
                 .staff(staff)
-                .beams(beams);
+                .beams(beams)
+                .lyrics(lyrics);
         if (accidental != null) {
             nb.displayedAccidental(accidental);
         }
@@ -488,6 +498,45 @@ public final class MusicXmlReader {
             nb.type(type);
         }
         return ParsedNote.note(nb.build(), chord);
+    }
+
+    /**
+     * Parse a {@code <lyric>} element. Returns {@code null} when the
+     * accumulated text is blank so the caller can drop the placeholder
+     * entry.
+     */
+    private Lyric readLyric(XMLStreamReader reader) throws XMLStreamException {
+        int verse = parseIntOr(reader.getAttributeValue(null, "number"), 1);
+        if (verse < 1) {
+            verse = 1;
+        }
+        Syllabic syllabic = Syllabic.SINGLE;
+        StringBuilder text = new StringBuilder();
+        while (reader.hasNext()) {
+            int event = reader.next();
+            if (event == XMLStreamConstants.START_ELEMENT) {
+                switch (reader.getLocalName()) {
+                    case "syllabic" -> syllabic = Syllabic.fromXml(readText(reader));
+                    case "text" -> {
+                        String chunk = readText(reader);
+                        if (chunk != null && !chunk.isEmpty()) {
+                            if (text.length() > 0) {
+                                text.append(' ');
+                            }
+                            text.append(chunk);
+                        }
+                    }
+                    default -> skipElement(reader);
+                }
+            } else if (event == XMLStreamConstants.END_ELEMENT && "lyric".equals(reader.getLocalName())) {
+                break;
+            }
+        }
+        String result = text.toString().trim();
+        if (result.isEmpty()) {
+            return null;
+        }
+        return new Lyric(result, syllabic, verse);
     }
 
     private static Accidental parseAccidental(String value) {

@@ -16,6 +16,7 @@ public final class Note implements MusicElement {
     private final boolean tieStop;
     private final Accidental displayedAccidental;
     private final List<Beam> beams;
+    private final List<Lyric> lyrics;
     private final int staff;
 
     private Note(Builder builder) {
@@ -27,6 +28,7 @@ public final class Note implements MusicElement {
         this.tieStop = builder.tieStop;
         this.displayedAccidental = builder.displayedAccidental;
         this.beams = List.copyOf(builder.beams);
+        this.lyrics = List.copyOf(builder.lyrics);
         this.staff = builder.staff;
     }
 
@@ -80,6 +82,14 @@ public final class Note implements MusicElement {
     }
 
     /**
+     * Lyric syllables attached to this note (one entry per verse). Empty for
+     * notes that carry no lyric.
+     */
+    public List<Lyric> lyrics() {
+        return lyrics;
+    }
+
+    /**
      * The staff index (1-based) this note is assigned to within its part.
      * Defaults to {@code 1} for single-staff parts.
      */
@@ -100,6 +110,7 @@ public final class Note implements MusicElement {
         private boolean tieStop;
         private Accidental displayedAccidental;
         private java.util.List<Beam> beams = new java.util.ArrayList<>();
+        private java.util.List<Lyric> lyrics = new java.util.ArrayList<>();
         private int staff = 1;
 
         public Builder pitch(Pitch pitch) {
@@ -144,6 +155,16 @@ public final class Note implements MusicElement {
 
         public Builder beams(java.util.List<Beam> beams) {
             this.beams = new java.util.ArrayList<>(beams);
+            return this;
+        }
+
+        public Builder addLyric(Lyric lyric) {
+            this.lyrics.add(lyric);
+            return this;
+        }
+
+        public Builder lyrics(java.util.List<Lyric> lyrics) {
+            this.lyrics = new java.util.ArrayList<>(lyrics);
             return this;
         }
 
