@@ -20,6 +20,14 @@ but the two tasks share the boxed-text follow-ups.
 
 ## Design
 
+### JavaDoc
+
+All classes and methods must have valid JavaDoc.
+
+### runTask
+
+Use runTask with caution is this blocks regularly. Don't wait longer than a minute and terminate it if it takes longer.
+
 ### 5.1 — `<harmony>` as its own `MusicElement`, not a `DirectionType`
 Chosen over folding it under `Direction` because:
 - MusicXML places `<harmony>` at the same nesting level as

@@ -18,6 +18,14 @@ loop.
 
 ## Design
 
+### JavaDoc
+
+All classes and methods must have valid JavaDoc.
+
+### runTask
+
+Use runTask with caution is this blocks regularly. Don't wait longer than a minute and terminate it if it takes longer.
+
 ### Model — `PartGroup` on `Score`
 
 `<part-group>` uses paired `<part-group number="N" type="start"/>` and

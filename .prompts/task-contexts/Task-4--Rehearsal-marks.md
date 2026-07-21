@@ -18,6 +18,14 @@ hierarchy, the above-staff placement plumbing, and the shared
 
 ## Design
 
+### JavaDoc
+
+All classes and methods must have valid JavaDoc.
+
+### runTask
+
+Use runTask with caution is this blocks regularly. Don't wait longer than a minute and terminate it if it takes longer.
+
 ### Model — `DirectionType.Rehearsal`
 - Add a new permitted record to the `DirectionType` sealed interface
   introduced in Task 3:

@@ -36,6 +36,14 @@ Concrete effect on the samples that motivated this work:
 
 ## Design
 
+### JavaDoc
+
+All classes and methods must have valid JavaDoc.
+
+### runTask
+
+Use runTask with caution is this blocks regularly. Don't wait longer than a minute and terminate it if it takes longer.
+
 ### Model — `Part.abbreviation()`
 
 `<part-abbreviation>` is currently silently dropped. Add a field:
