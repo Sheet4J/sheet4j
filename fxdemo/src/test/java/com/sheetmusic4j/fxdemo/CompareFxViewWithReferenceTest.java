@@ -1,19 +1,5 @@
 package com.sheetmusic4j.fxdemo;
 
-import com.sheetmusic4j.core.model.Score;
-import com.sheetmusic4j.core.musicxml.MusicXmlReader;
-import com.sheetmusic4j.engraving.Engraver;
-import com.sheetmusic4j.engraving.LayoutOptions;
-import com.sheetmusic4j.engraving.LayoutResult;
-import com.sheetmusic4j.fxdemo.reference.DiagnosticComparator;
-import com.sheetmusic4j.fxdemo.reference.DiffReportWriter;
-import com.sheetmusic4j.fxdemo.reference.ReferenceCache;
-import org.junit.jupiter.api.Assumptions;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
-
 import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
 import java.io.InputStream;
@@ -26,6 +12,20 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+
+import com.sheetmusic4j.core.model.Score;
+import com.sheetmusic4j.core.musicxml.MusicXmlReader;
+import com.sheetmusic4j.engraving.Engraver;
+import com.sheetmusic4j.engraving.LayoutOptions;
+import com.sheetmusic4j.engraving.LayoutResult;
+import com.sheetmusic4j.fxdemo.reference.DiagnosticComparator;
+import com.sheetmusic4j.fxdemo.reference.DiffReportWriter;
+import com.sheetmusic4j.fxdemo.reference.ReferenceCache;
 
 /**
  * Diagnostic replacement for the old whole-image {@code CompareFxViewWithPdfTest}:
@@ -166,5 +166,4 @@ class CompareFxViewWithReferenceTest {
             return new MusicXmlReader().read(in);
         }
     }
-
-    }
+}

@@ -1,25 +1,24 @@
 package com.sheetmusic4j.engraving;
 
-import com.sheetmusic4j.core.model.Attributes;
-import com.sheetmusic4j.core.model.Clef;
-import com.sheetmusic4j.core.model.Duration;
-import com.sheetmusic4j.core.model.KeySignature;
-import com.sheetmusic4j.core.model.Measure;
-import com.sheetmusic4j.core.model.MusicElement;
-import com.sheetmusic4j.core.model.Note;
-import com.sheetmusic4j.core.model.Part;
-import com.sheetmusic4j.core.model.Pitch;
-import com.sheetmusic4j.core.model.Score;
-import com.sheetmusic4j.core.model.Step;
-import com.sheetmusic4j.core.model.TimeSignature;
-import org.junit.jupiter.api.Test;
-
 import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+
+import com.sheetmusic4j.core.model.Attributes;
+import com.sheetmusic4j.core.model.Clef;
+import com.sheetmusic4j.core.model.Duration;
+import com.sheetmusic4j.core.model.KeySignature;
+import com.sheetmusic4j.core.model.Measure;
+import com.sheetmusic4j.core.model.Note;
+import com.sheetmusic4j.core.model.Part;
+import com.sheetmusic4j.core.model.Pitch;
+import com.sheetmusic4j.core.model.Score;
+import com.sheetmusic4j.core.model.Step;
+import com.sheetmusic4j.core.model.TimeSignature;
 
 class EngraverTest {
 

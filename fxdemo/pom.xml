@@ -58,12 +58,7 @@
             <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
-        <dependency>
-            <groupId>org.testfx</groupId>
-            <artifactId>openjfx-monocle</artifactId>
-            <scope>test</scope>
-        </dependency>
-    </dependencies>
+        </dependencies>
 
     <build>
         <plugins>
@@ -97,6 +92,18 @@
                 Activate with:  mvn -pl fxdemo -Prefresh-references test
             -->
             <id>refresh-references</id>
+            <dependencies>
+                <!--
+                    Headless JavaFX Monocle backend is only needed when running the
+                    WebView-driven reference generator. Adding it here keeps the
+                    default "mvn test" free of any external artifact resolution.
+                -->
+                <dependency>
+                    <groupId>org.testfx</groupId>
+                    <artifactId>openjfx-monocle</artifactId>
+                    <scope>test</scope>
+                </dependency>
+            </dependencies>
             <build>
                 <plugins>
                     <plugin>
