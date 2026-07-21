@@ -1,5 +1,12 @@
 package com.sheetmusic4j.fxdemo.reference;
 
+import java.awt.image.BufferedImage;
+import java.net.URL;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
+
 import javafx.application.Platform;
 import javafx.concurrent.Worker;
 import javafx.embed.swing.SwingFXUtils;
@@ -9,13 +16,6 @@ import javafx.scene.image.WritableImage;
 import javafx.scene.paint.Color;
 import javafx.scene.web.WebView;
 import javafx.stage.Stage;
-
-import java.awt.image.BufferedImage;
-import java.net.URL;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Renders a MusicXML string into a {@link BufferedImage} by driving a JavaFX
@@ -160,17 +160,28 @@ public final class WebViewReferenceRenderer {
             stage = new Stage();
             Scene scene = new Scene(view, widthPx, heightPx, Color.WHITE);
             stage.setScene(scene);
-            // Do not show(): headless snapshot works on a non-visible Stage/Scene
-            // provided the Scene has been attached, which happens here.
+            // WebView's WebKit backing surface only gets composited into the
+            // scene graph after the Stage has actually gone through paint
+            // pulses. Snapshotting an unshown WebView reliably yields a blank
+            // (white) image. We show the Stage far off-screen so it paints for
+            // real, then close it once the snapshot has been captured.
+            stage.setX(-100_000);
+            stage.setY(-100_000);
+            stage.setWidth(widthPx);
+            stage.setHeight(heightPx);
+            stage.show();
         } catch (Throwable t) {
             future.complete(Result.error("Failed to create WebView: " + t.getMessage()));
             return;
         }
 
+        final Stage finalStage = stage;
+        final WebView finalView = view;
+
         var engine = view.getEngine();
         engine.getLoadWorker().stateProperty().addListener((obs, oldState, newState) -> {
             if (newState == Worker.State.FAILED) {
-                future.complete(Result.error("Failed to load OSMD HTML page"));
+                completeAndClose(finalStage, future, Result.error("Failed to load OSMD HTML page"));
             } else if (newState == Worker.State.SUCCEEDED) {
                 triggerRender(engine, musicXml, widthPx);
             }
@@ -181,15 +192,28 @@ public final class WebViewReferenceRenderer {
                 return;
             }
             if (newTitle.equals(TITLE_DONE)) {
-                snapshotAndComplete(view, future);
+                // Give the JavaFX pulse pipeline a couple of frames to actually
+                // commit WebKit's rendered content to the WebView node before
+                // snapshotting. Two nested runLaters is a well-known idiom.
+                Platform.runLater(() -> Platform.runLater(() ->
+                        snapshotAndComplete(finalView, finalStage, future)));
             } else if (newTitle.equals(TITLE_MISSING)) {
-                future.complete(Result.unavailable());
+                completeAndClose(finalStage, future, Result.unavailable());
             } else if (newTitle.startsWith(TITLE_ERROR_PREFIX)) {
-                future.complete(Result.error(newTitle));
+                completeAndClose(finalStage, future, Result.error(newTitle));
             }
         });
 
         engine.load(pageUrl);
+    }
+
+    private static void completeAndClose(Stage stage, CompletableFuture<Result> future, Result result) {
+        try {
+            stage.close();
+        } catch (Throwable ignore) {
+            // best effort
+        }
+        future.complete(result);
     }
 
     private void triggerRender(javafx.scene.web.WebEngine engine, String musicXml, int widthPx) {
@@ -202,15 +226,20 @@ public final class WebViewReferenceRenderer {
         }
     }
 
-    private void snapshotAndComplete(WebView view, CompletableFuture<Result> future) {
+    private void snapshotAndComplete(WebView view, Stage stage, CompletableFuture<Result> future) {
         try {
+            // Force a layout pass so WebView's peer has current bounds before we snapshot.
+            if (view.getScene() != null && view.getScene().getRoot() != null) {
+                view.getScene().getRoot().applyCss();
+                view.getScene().getRoot().layout();
+            }
             SnapshotParameters params = new SnapshotParameters();
             params.setFill(Color.WHITE);
             WritableImage fxImage = view.snapshot(params, null);
             BufferedImage image = SwingFXUtils.fromFXImage(fxImage, null);
-            future.complete(Result.success(image));
+            completeAndClose(stage, future, Result.success(image));
         } catch (Throwable t) {
-            future.complete(Result.error("Snapshot failed: " + t.getMessage()));
+            completeAndClose(stage, future, Result.error("Snapshot failed: " + t.getMessage()));
         }
     }
 
