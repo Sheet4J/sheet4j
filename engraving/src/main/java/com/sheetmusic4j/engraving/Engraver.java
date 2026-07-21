@@ -25,18 +25,28 @@ import com.sheetmusic4j.core.model.TimeSignature;
 /**
  * Turns a {@link Score} into a framework-agnostic {@link LayoutResult}.
  *
- * <p>This iteration:
+ * <p>Layout pipeline:
  * <ul>
- *   <li>lays every part out as one or more staves (multi-staff piano grand staff supported)
- *       on a single system,</li>
+ *   <li>lays every part out as one or more staves (multi-staff piano grand
+ *       staff supported),</li>
+ *   <li>packs measures into one or more {@link SystemLayout systems}, breaking
+ *       the row whenever the next measure would overflow the available
+ *       {@link LayoutOptions#systemWidth() staff width},</li>
+ *   <li>aligns measure boundaries across parts by computing a shared
+ *       per-measure width from the widest weight seen across all parts,</li>
+ *   <li>re-emits the clef (and current key signature, and time signature only
+ *       when it just changed) at the start of every new system,</li>
  *   <li>emits real per-digit time signature glyphs based on
  *       {@link Attributes#timeSignature()},</li>
  *   <li>emits key-signature accidentals after the clef,</li>
- *   <li>emits {@link Glyph#STEM_UP}/{@link Glyph#STEM_DOWN} placements for notes
- *       whose duration is shorter than a whole note, with direction chosen by
- *       staff position (down when above the middle line, up otherwise),</li>
- *   <li>emits flags for unbeamed short notes and beam segments for beamed groups,</li>
- *   <li>emits accidentals, augmentation dots, and tie arcs when the note carries them,</li>
+ *   <li>emits {@link Glyph#STEM_UP}/{@link Glyph#STEM_DOWN} placements for
+ *       notes whose duration is shorter than a whole note, with direction
+ *       chosen by staff position (down when above the middle line, up
+ *       otherwise),</li>
+ *   <li>emits flags for unbeamed short notes and beam segments for beamed
+ *       groups,</li>
+ *   <li>emits accidentals, augmentation dots, and tie arcs when the note
+ *       carries them,</li>
  *   <li>sizes measures proportionally to the sum of their note/rest durations,
  *       clamped by {@link LayoutOptions#measureMinWidth()}.</li>
  * </ul>
@@ -50,36 +60,181 @@ public final class Engraver {
     private static final double STEM_LENGTH_GAPS = 3.5;
 
     public LayoutResult layout(Score score, LayoutOptions options) {
-        List<StaffLayout> staves = new ArrayList<>();
-        double y = options.topMargin();
+        if (score.parts().isEmpty()) {
+            SystemLayout empty = new SystemLayout(0, 0, options.systemWidth(), List.of());
+            return new LayoutResult(List.of(empty), options.systemWidth(),
+                    options.topMargin() + options.staffHeight());
+        }
+
         double staffWidth = options.systemWidth() - options.leftMargin() - options.rightMargin();
 
+        List<PartInfo> parts = new ArrayList<>(score.parts().size());
+        int measureCount = 0;
         for (Part part : score.parts()) {
-            List<StaffLayout> partStaves = layoutPart(part, options.leftMargin(), y, staffWidth, options);
-            staves.addAll(partStaves);
-            y += (options.staffHeight() + options.staffSpacing()) * Math.max(1, partStaves.size());
+            PartInfo info = PartInfo.of(part);
+            parts.add(info);
+            measureCount = Math.max(measureCount, part.measures().size());
+        }
+        if (measureCount == 0) {
+            SystemLayout empty = new SystemLayout(0, 0, options.systemWidth(), List.of());
+            return new LayoutResult(List.of(empty), options.systemWidth(),
+                    options.topMargin() + options.staffHeight());
         }
 
-        double height = staves.isEmpty()
-                ? options.topMargin() + options.staffHeight()
-                : y - options.staffSpacing() + options.rightMargin();
-        SystemLayout system = new SystemLayout(0, 0, options.systemWidth(), staves);
-        return new LayoutResult(List.of(system), options.systemWidth(), height);
+        double firstSystemHeader = maxHeaderAdvanceAtRowStart(parts, 0, options);
+        List<Double> sharedWeights = sharedMeasureWeights(parts, measureCount);
+        List<Double> baseWidths = distributeWidths(
+                sharedWeights, Math.max(1.0, staffWidth - firstSystemHeader), options.measureMinWidth());
+        List<int[]> rows = computeRowRanges(baseWidths, staffWidth, firstSystemHeader, parts, options);
+
+        List<SystemLayout> systems = new ArrayList<>(rows.size());
+        double y = options.topMargin();
+        for (int rowIdx = 0; rowIdx < rows.size(); rowIdx++) {
+            int[] range = rows.get(rowIdx);
+            int start = range[0];
+            int endExclusive = range[1];
+
+            double rowHeader = maxHeaderAdvanceAtRowStart(parts, start, options);
+            List<Double> rowWidths = stretchRowWidths(baseWidths, start, endExclusive,
+                    Math.max(0, staffWidth - rowHeader));
+
+            List<StaffLayout> stavesForRow = new ArrayList<>();
+            double staffTop = y;
+            for (PartInfo p : parts) {
+                for (int staffIdx = 0; staffIdx < p.staveCount(); staffIdx++) {
+                    StaffLayout sl = layoutStaffRow(
+                            p, staffIdx, options.leftMargin(), staffTop,
+                            options, start, endExclusive, rowWidths, rowIdx == 0);
+                    stavesForRow.add(sl);
+                    staffTop += options.staffHeight() + options.staffSpacing();
+                }
+            }
+            systems.add(new SystemLayout(0, y, options.systemWidth(), stavesForRow));
+            y = staffTop;
+        }
+
+        double height = y - options.staffSpacing() + options.rightMargin();
+        return new LayoutResult(systems, options.systemWidth(), height);
     }
 
-    private List<StaffLayout> layoutPart(Part part, double x, double y, double width, LayoutOptions options) {
-        int staveCount = determineStaveCount(part);
-        List<Clef> defaultClefs = defaultClefsFor(part, staveCount);
+    /**
+     * Per-part immutable metadata plus a per-measure trace of the clef/key/time
+     * signature state (the state effective from that measure onwards).
+     */
+    private static final class PartInfo {
+        private final Part part;
+        private final int staveCount;
+        private final Clef[][] clefsPerMeasure; // [measureIndex][staffIndex]
+        private final KeySignature[] keyPerMeasure;
+        private final TimeSignature[] timePerMeasure;
 
-        List<StaffLayout> result = new ArrayList<>(staveCount);
-        double staffTop = y;
-        for (int staffIdx = 0; staffIdx < staveCount; staffIdx++) {
-            Clef clefForStaff = staffIdx < defaultClefs.size() ? defaultClefs.get(staffIdx) : Clef.treble();
-            int staffNumber = staffIdx + 1;
-            result.add(layoutStaff(part, x, staffTop, width, options, staffNumber, clefForStaff, staveCount));
-            staffTop += options.staffHeight() + options.staffSpacing();
+        private PartInfo(Part part, int staveCount,
+                         Clef[][] clefs, KeySignature[] keys, TimeSignature[] times) {
+            this.part = part;
+            this.staveCount = staveCount;
+            this.clefsPerMeasure = clefs;
+            this.keyPerMeasure = keys;
+            this.timePerMeasure = times;
         }
-        return result;
+
+        Part part() {
+            return part;
+        }
+
+        int staveCount() {
+            return staveCount;
+        }
+
+        Clef clefAt(int measureIdx, int staffIdx) {
+            if (clefsPerMeasure.length == 0) {
+                return Clef.treble();
+            }
+            int m = Math.min(measureIdx, clefsPerMeasure.length - 1);
+            return clefsPerMeasure[m][Math.min(staffIdx, staveCount - 1)];
+        }
+
+        KeySignature keyAt(int measureIdx) {
+            if (keyPerMeasure.length == 0) {
+                return KeySignature.cMajor();
+            }
+            return keyPerMeasure[Math.min(measureIdx, keyPerMeasure.length - 1)];
+        }
+
+        TimeSignature timeAt(int measureIdx) {
+            if (timePerMeasure.length == 0) {
+                return null;
+            }
+            return timePerMeasure[Math.min(measureIdx, timePerMeasure.length - 1)];
+        }
+
+        /**
+         * Whether the time signature effective at {@code measureIdx} differs
+         * from the one effective at the previous measure. Used to decide
+         * whether to re-emit the time signature at the start of a new system.
+         */
+        boolean timeChangedAt(int measureIdx) {
+            if (measureIdx <= 0 || timePerMeasure.length == 0) {
+                return timeAt(measureIdx) != null;
+            }
+            TimeSignature previous = timePerMeasure[Math.min(measureIdx - 1, timePerMeasure.length - 1)];
+            TimeSignature current = timeAt(measureIdx);
+            if (previous == null) {
+                return current != null;
+            }
+            if (current == null) {
+                return false;
+            }
+            return previous.beats() != current.beats() || previous.beatType() != current.beatType();
+        }
+
+        static PartInfo of(Part part) {
+            int staveCount = determineStaveCount(part);
+            List<Clef> defaults = defaultClefsFor(part, staveCount);
+
+            int n = part.measures().size();
+            Clef[][] clefs = new Clef[n][staveCount];
+            KeySignature[] keys = new KeySignature[n];
+            TimeSignature[] times = new TimeSignature[n];
+
+            Clef[] currentClefs = new Clef[staveCount];
+            for (int i = 0; i < staveCount; i++) {
+                currentClefs[i] = defaults.get(i);
+            }
+            KeySignature currentKey = KeySignature.cMajor();
+            TimeSignature currentTime = null;
+
+            for (int idx = 0; idx < n; idx++) {
+                Measure measure = part.measures().get(idx);
+                if (measure.attributes().isPresent()) {
+                    Attributes a = measure.attributes().get();
+                    if (!a.clefs().isEmpty()) {
+                        for (int i = 0; i < staveCount; i++) {
+                            if (i < a.clefs().size()) {
+                                currentClefs[i] = a.clefs().get(i);
+                            } else if (a.clef().isPresent()) {
+                                currentClefs[i] = a.clef().get();
+                            }
+                        }
+                    } else if (a.clef().isPresent()) {
+                        for (int i = 0; i < staveCount; i++) {
+                            currentClefs[i] = a.clef().get();
+                        }
+                    }
+                    if (a.keySignature().isPresent()) {
+                        currentKey = a.keySignature().get();
+                    }
+                    if (a.timeSignature().isPresent()) {
+                        currentTime = a.timeSignature().get();
+                    }
+                }
+                for (int i = 0; i < staveCount; i++) {
+                    clefs[idx][i] = currentClefs[i];
+                }
+                keys[idx] = currentKey;
+                times[idx] = currentTime;
+            }
+            return new PartInfo(part, staveCount, clefs, keys, times);
+        }
     }
 
     /**
@@ -107,7 +262,15 @@ public final class Engraver {
             if (measure.attributes().isPresent()) {
                 Attributes attr = measure.attributes().get();
                 if (!attr.clefs().isEmpty()) {
-                    return attr.clefs();
+                    List<Clef> clefs = new ArrayList<>(staveCount);
+                    for (int i = 0; i < staveCount; i++) {
+                        if (i < attr.clefs().size()) {
+                            clefs.add(attr.clefs().get(i));
+                        } else {
+                            clefs.add(i == 0 ? Clef.treble() : Clef.bass());
+                        }
+                    }
+                    return clefs;
                 }
             }
         }
@@ -118,51 +281,201 @@ public final class Engraver {
         return defaults;
     }
 
-    private StaffLayout layoutStaff(Part part, double x, double y, double width, LayoutOptions options,
-                                    int staffNumber, Clef initialClef, int totalStaves) {
+    /**
+     * Compute the horizontal space the painter needs at the head of a staff
+     * for the given clef + optional key signature + optional time signature.
+     *
+     * <p>The value must match the advances used by
+     * {@link #placeKeySignature} and {@link #placeTimeSignature} plus the
+     * clef reservation applied in {@link #layoutStaffRow}. Callers use it to
+     * (a) size the header block, and (b) determine how much space to reserve
+     * before the row's first measure.
+     */
+    static double headerAdvance(Clef clef, KeySignature key, TimeSignature time, LayoutOptions options) {
+        double gap = options.staffLineGap();
+        // Left padding + clef block. gap*0.5 opening pad + gap*3.5 clef space.
+        double advance = gap * 4;
+        if (key != null && (key.sharps() != 0 || key.flats() != 0)) {
+            int count = Math.min(7, Math.max(key.sharps(), key.flats()));
+            double accAdvance = gap * 1.1;
+            advance += count * accAdvance + gap * 0.5;
+        }
+        if (time != null) {
+            double digitWidth = gap * 1.4;
+            int beatsLen = Integer.toString(time.beats()).length();
+            int beatTypeLen = Integer.toString(time.beatType()).length();
+            int maxLen = Math.max(beatsLen, beatTypeLen);
+            advance += maxLen * digitWidth + gap;
+        }
+        return advance;
+    }
+
+    /**
+     * Maximum header advance width across every part at the beginning of the
+     * given row (i.e. at {@code measureIndex}), using the effective clef of
+     * staff 0 for each part.
+     */
+    private static double maxHeaderAdvanceAtRowStart(List<PartInfo> parts, int measureIndex,
+                                                     LayoutOptions options) {
+        double max = 0.0;
+        for (PartInfo p : parts) {
+            if (p.part().measures().isEmpty()) {
+                continue;
+            }
+            int idx = Math.min(measureIndex, p.part().measures().size() - 1);
+            Clef clef = p.clefAt(idx, 0);
+            KeySignature key = p.keyAt(idx);
+            TimeSignature time = p.timeAt(idx);
+            // Row-start header always shows clef + key; time only when it changed.
+            TimeSignature timeToShow = (measureIndex == 0 || p.timeChangedAt(measureIndex))
+                    ? time
+                    : null;
+            max = Math.max(max, headerAdvance(clef, key, timeToShow, options));
+        }
+        return max;
+    }
+
+    /**
+     * Shared per-measure weights across all parts: for each measure index we
+     * take the maximum weight seen in any part. This is what drives the
+     * cross-part measure width alignment.
+     */
+    private static List<Double> sharedMeasureWeights(List<PartInfo> parts, int measureCount) {
+        List<Double> weights = new ArrayList<>(measureCount);
+        for (int idx = 0; idx < measureCount; idx++) {
+            double max = 0.0;
+            for (PartInfo p : parts) {
+                if (idx < p.part().measures().size()) {
+                    max = Math.max(max, measureWeight(p.part().measures().get(idx)));
+                }
+            }
+            weights.add(max > 0 ? max : 1.0);
+        }
+        return weights;
+    }
+
+    /**
+     * Distribute {@code totalWidth} across a list of weight-sized measures,
+     * clamping each measure width to at least {@code min}.
+     */
+    private static List<Double> distributeWidths(List<Double> weights, double totalWidth, double min) {
+        List<Double> widths = new ArrayList<>(weights.size());
+        if (weights.isEmpty()) {
+            return widths;
+        }
+        double sumWeights = 0.0;
+        for (double w : weights) {
+            sumWeights += w;
+        }
+        double effective = Math.max(totalWidth, min * weights.size());
+        double sum = 0.0;
+        for (double w : weights) {
+            double raw = sumWeights > 0 ? effective * (w / sumWeights) : effective / weights.size();
+            double width = Math.max(min, raw);
+            widths.add(width);
+            sum += width;
+        }
+        if (sum < effective) {
+            double leftover = effective - sum;
+            for (int i = 0; i < widths.size(); i++) {
+                widths.set(i, widths.get(i) + leftover * (weights.get(i) / Math.max(sumWeights, 1e-9)));
+            }
+        }
+        return widths;
+    }
+
+    /**
+     * Greedy row-break: pack measures into rows so the sum of their base
+     * widths plus the row's header does not exceed the available staff
+     * width. Each row contains at least one measure.
+     */
+    private static List<int[]> computeRowRanges(List<Double> baseWidths, double staffWidth,
+                                                 double firstSystemHeader, List<PartInfo> parts,
+                                                 LayoutOptions options) {
+        List<int[]> rows = new ArrayList<>();
+        int n = baseWidths.size();
+        if (n == 0) {
+            return rows;
+        }
+        int start = 0;
+        double header = firstSystemHeader;
+        double cursor = header;
+        for (int i = 0; i < n; i++) {
+            double w = baseWidths.get(i);
+            if (i > start && cursor + w > staffWidth + 1e-6) {
+                rows.add(new int[]{start, i});
+                start = i;
+                header = maxHeaderAdvanceAtRowStart(parts, start, options);
+                cursor = header + w;
+            } else {
+                cursor += w;
+            }
+        }
+        rows.add(new int[]{start, n});
+        return rows;
+    }
+
+    /**
+     * Stretch the base widths of measures {@code [start, endExclusive)} so
+     * they fill the given target width exactly, preserving their relative
+     * proportions.
+     */
+    private static List<Double> stretchRowWidths(List<Double> baseWidths, int start, int endExclusive,
+                                                 double target) {
+        List<Double> widths = new ArrayList<>(endExclusive - start);
+        if (endExclusive <= start) {
+            return widths;
+        }
+        double sum = 0.0;
+        for (int i = start; i < endExclusive; i++) {
+            sum += baseWidths.get(i);
+        }
+        if (sum <= 0 || target <= 0) {
+            for (int i = start; i < endExclusive; i++) {
+                widths.add(baseWidths.get(i));
+            }
+            return widths;
+        }
+        double scale = target / sum;
+        for (int i = start; i < endExclusive; i++) {
+            widths.add(baseWidths.get(i) * scale);
+        }
+        return widths;
+    }
+
+    private StaffLayout layoutStaffRow(PartInfo partInfo, int staffIdx, double x, double y,
+                                       LayoutOptions options,
+                                       int start, int endExclusive, List<Double> rowWidths,
+                                       boolean firstRow) {
+        Part part = partInfo.part();
+        int staveCount = partInfo.staveCount();
+        int staffNumber = staffIdx + 1;
+
         List<MeasureLayout> measureLayouts = new ArrayList<>();
         List<GlyphPlacement> glyphs = new ArrayList<>();
         List<BeamPlacement> beams = new ArrayList<>();
         List<TiePlacement> ties = new ArrayList<>();
 
-        List<Double> measureWidths = computeMeasureWidths(part, width, options);
-
-        Clef currentClef = initialClef;
-        KeySignature currentKey = KeySignature.cMajor();
-        TimeSignature currentTimeSignature = null;
-        double cursorX = x;
-        boolean first = true;
-
         Map<Integer, BeamRun> openBeams = new HashMap<>();
         Map<String, PlacedNote> tieCandidates = new HashMap<>();
 
-        for (int idx = 0; idx < part.measures().size(); idx++) {
-            Measure measure = part.measures().get(idx);
-            if (measure.attributes().isPresent()) {
-                Attributes attributes = measure.attributes().get();
-                // Per-staff clef selection.
-                if (!attributes.clefs().isEmpty()) {
-                    if (attributes.clefs().size() >= staffNumber) {
-                        currentClef = attributes.clefs().get(staffNumber - 1);
-                    } else if (attributes.clef().isPresent()) {
-                        currentClef = attributes.clef().get();
-                    }
-                } else if (attributes.clef().isPresent()) {
-                    currentClef = attributes.clef().get();
-                }
-                if (attributes.keySignature().isPresent()) {
-                    currentKey = attributes.keySignature().get();
-                }
-                if (attributes.timeSignature().isPresent()) {
-                    currentTimeSignature = attributes.timeSignature().get();
-                }
-            }
+        double cursorX = x;
+        boolean firstMeasureInRow = true;
 
-            double measureWidth = measureWidths.get(idx);
+        for (int idx = start; idx < endExclusive; idx++) {
+            if (idx >= part.measures().size()) {
+                break;
+            }
+            Measure measure = part.measures().get(idx);
+            Clef currentClef = partInfo.clefAt(idx, staffIdx);
+            KeySignature currentKey = partInfo.keyAt(idx);
+            TimeSignature currentTime = partInfo.timeAt(idx);
+
+            double measureWidth = rowWidths.get(idx - start);
             measureLayouts.add(new MeasureLayout(measure.number(), cursorX, measureWidth));
 
             double contentStart = cursorX + options.staffLineGap();
-            if (first) {
+            if (firstMeasureInRow) {
                 double clefY = y + clefAnchorLineIndex(currentClef) * options.staffLineGap();
                 glyphs.add(new GlyphPlacement(cursorX + options.staffLineGap() * 0.5,
                         clefY, clefGlyph(currentClef), 4));
@@ -170,25 +483,28 @@ public final class Engraver {
                 if (currentKey.fifths() != 0) {
                     contentStart = placeKeySignature(glyphs, currentKey, currentClef, contentStart, y, options);
                 }
-                if (currentTimeSignature != null) {
-                    contentStart = placeTimeSignature(glyphs, currentTimeSignature, contentStart, y, options);
+                boolean showTime = (idx == 0 && firstRow) || partInfo.timeChangedAt(idx);
+                if (currentTime != null && showTime) {
+                    contentStart = placeTimeSignature(glyphs, currentTime, contentStart, y, options);
                 }
             }
 
-            List<MusicElement> elements = filterElementsForStaff(measure.elements(), staffNumber, totalStaves);
+            List<MusicElement> elements = filterElementsForStaff(measure.elements(), staffNumber, staveCount);
             double available = (cursorX + measureWidth) - contentStart - options.staffLineGap();
             double step = elements.isEmpty() ? available : available / elements.size();
             double noteX = contentStart;
             for (MusicElement element : elements) {
-                placeElement(glyphs, beams, ties, openBeams, tieCandidates, element, noteX, y, currentClef, options);
+                placeElement(glyphs, beams, ties, openBeams, tieCandidates,
+                        element, noteX, y, currentClef, options);
                 noteX += step;
             }
 
             cursorX += measureWidth;
-            first = false;
+            firstMeasureInRow = false;
         }
 
-        return new StaffLayout(x, y, cursorX - x, options.staffLineGap(), measureLayouts, glyphs, beams, ties);
+        return new StaffLayout(x, y, cursorX - x, options.staffLineGap(),
+                measureLayouts, glyphs, beams, ties);
     }
 
     /**
@@ -235,41 +551,6 @@ public final class Engraver {
             line = 5;
         }
         return 5 - line;
-    }
-
-    /**
-     * Compute a proportional width per measure based on the total quarter-note
-     * duration each measure carries, clamped to at least {@link LayoutOptions#measureMinWidth()}
-     * and scaled to fill the available staff width when possible.
-     */
-    private static List<Double> computeMeasureWidths(Part part, double totalWidth, LayoutOptions options) {
-        List<Double> weights = new ArrayList<>();
-        double sumWeights = 0.0;
-        for (Measure measure : part.measures()) {
-            double weight = measureWeight(measure);
-            weights.add(weight);
-            sumWeights += weight;
-        }
-        if (weights.isEmpty()) {
-            return weights;
-        }
-
-        List<Double> widths = new ArrayList<>(weights.size());
-        double min = options.measureMinWidth();
-        double sumRawWidth = 0.0;
-        for (double w : weights) {
-            double raw = sumWeights > 0 ? totalWidth * (w / sumWeights) : totalWidth / weights.size();
-            double width = Math.max(min, raw);
-            widths.add(width);
-            sumRawWidth += width;
-        }
-        if (sumRawWidth <= totalWidth) {
-            double leftover = totalWidth - sumRawWidth;
-            for (int i = 0; i < widths.size(); i++) {
-                widths.set(i, widths.get(i) + leftover * (weights.get(i) / Math.max(sumWeights, 1e-9)));
-            }
-        }
-        return widths;
     }
 
     private static double measureWeight(Measure measure) {

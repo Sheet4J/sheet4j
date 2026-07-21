@@ -151,7 +151,10 @@ public final class SheetDemoApp extends Application {
             if (Math.abs(w - lastViewportWidth) > 0.5) {
                 lastViewportWidth = w;
                 sheetView.setSystemWidth(w);
-                updateDebug(currentScore, PdfSibling.existingPathFor(currentFile != null ? currentFile : java.nio.file.Path.of(".")));
+                Optional<Path> pdf = currentFile != null
+                        ? PdfSibling.existingPathFor(currentFile)
+                        : Optional.empty();
+                updateDebug(currentScore, pdf);
             }
         });
         BorderPane scorePane = new BorderPane(scoreScroll);

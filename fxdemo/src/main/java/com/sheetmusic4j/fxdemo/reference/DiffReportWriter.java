@@ -43,8 +43,8 @@ public final class DiffReportWriter {
      * @throws IOException if the output directory or report files cannot be written
      */
      public static Path write(Path outputDir, String name, BufferedImage rendered, BufferedImage reference,
-                             int referencePageCount, int renderedSystems,
-                             DiagnosticComparator.Diagnostic diagnostic) throws IOException {
+                              int referencePageCount, int renderedSystems,
+                              DiagnosticComparator.Diagnostic diagnostic) throws IOException {
         Files.createDirectories(outputDir);
 
         Path renderedPng = outputDir.resolve("rendered.png");
