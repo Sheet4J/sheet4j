@@ -350,21 +350,37 @@ public final class ScorePainter {
      * dedicated surface primitive; the two-segment approximation is enough
      * for the diagnostic comparator's window-level similarity check.
      */
+    /**
+     * Strokes a smooth rounded arc from ({@code x1},{@code y1}) to
+     * ({@code x2},{@code y2}) whose apex reaches {@code peakY}, using a
+     * cubic curve with two inset control points so the shape stays an
+     * evenly rounded dome regardless of how deep the bend is relative to
+     * the horizontal span. A single-control-point quadratic curve gets
+     * visibly more "pointed" as that ratio grows (e.g. a slur clearing a
+     * melodic peak far above its two endpoints) - two independent control
+     * points avoid that.
+     */
+    private void strokeArc(RenderSurface surface, double x1, double y1, double x2, double y2, double peakY) {
+        double avgY = (y1 + y2) / 2.0;
+        // A cubic curve with both control points at the same y reaches 75%
+        // of the way from the endpoint average to that y at its own apex
+        // (t = 0.5); solve for the control y that lands the rendered apex
+        // exactly at peakY.
+        double controlY = (4 * peakY - avgY) / 3.0;
+        double c1x = x1 + (x2 - x1) * 0.25;
+        double c2x = x1 + (x2 - x1) * 0.75;
+        surface.strokeCubicCurve(x1, y1, c1x, controlY, c2x, controlY, x2, y2);
+    }
+
     private void drawTie(RenderSurface surface, StaffLayout staff, TiePlacement tie) {
         double gap = staff.lineGap();
         double bend = gap * 0.6 * (tie.curveUp() ? -1 : 1);
-        double midX = (tie.x1() + tie.x2()) / 2.0;
         double avgY = (tie.y1() + tie.y2()) / 2.0;
-        // A quadratic curve only reaches the midpoint of (control point,
-        // straight-line average) at its own apex - not the control point
-        // itself - so the control point must overshoot the intended visual
-        // peak by 2x for the rendered curve to actually reach it.
-        double controlY = avgY + 2 * bend;
-        surface.strokeQuadCurve(tie.x1(), tie.y1(), midX, controlY, tie.x2(), tie.y2());
+        strokeArc(surface, tie.x1(), tie.y1(), tie.x2(), tie.y2(), avgY + bend);
     }
 
     /**
-     * Draw a slur as a rounded arc (a real quadratic curve, not two straight
+     * Draw a slur as a rounded arc (a real cubic curve, not two straight
      * segments meeting at a point - that reads as an angular "^"/"V" rather
      * than a slur). Slurs typically span more horizontal distance than
      * ties, so the bend is proportional to the span rather than a flat
@@ -391,10 +407,7 @@ public final class ScorePainter {
             double defaultPeak = avgY + Math.max(gap * 1.3, span * 0.12);
             midY = Math.max(defaultPeak, slur.clearY() + clearance);
         }
-        // Same doubled-control-point trick as drawTie, so the curve's own
-        // apex - not the control point - lands at the computed midY.
-        double controlY = 2 * midY - avgY;
-        surface.strokeQuadCurve(slur.x1(), slur.y1(), midX, controlY, slur.x2(), slur.y2());
+        strokeArc(surface, slur.x1(), slur.y1(), slur.x2(), slur.y2(), midY);
     }
 
     /**

@@ -105,4 +105,29 @@ public interface RenderSurface {
         strokeLine(x1, y1, cx, cy);
         strokeLine(cx, cy, x2, y2);
     }
+
+    /**
+     * Strokes a smooth cubic (2-control-point) curve from
+     * ({@code x1},{@code y1}) to ({@code x2},{@code y2}). Unlike
+     * {@link #strokeQuadCurve}, two independent control points keep the arc
+     * looking evenly rounded regardless of how deep it needs to bend - a
+     * single-control-point quadratic curve gets visibly more "pointed" as
+     * its bend-to-span ratio grows (e.g. a slur clearing a melodic peak far
+     * above its two endpoints), where a cubic curve stays a smooth dome.
+     * The default falls back to the quadratic approximation; backends with
+     * a native cubic Bezier primitive (JavaFX/AWT) override this.
+     *
+     * @param x1  start x
+     * @param y1  start y
+     * @param c1x first control point x
+     * @param c1y first control point y
+     * @param c2x second control point x
+     * @param c2y second control point y
+     * @param x2  end x
+     * @param y2  end y
+     */
+    default void strokeCubicCurve(double x1, double y1, double c1x, double c1y,
+                                  double c2x, double c2y, double x2, double y2) {
+        strokeQuadCurve(x1, y1, (c1x + c2x) / 2.0, (c1y + c2y) / 2.0, x2, y2);
+    }
 }
