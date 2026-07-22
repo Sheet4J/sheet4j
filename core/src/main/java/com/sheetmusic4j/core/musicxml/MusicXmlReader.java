@@ -853,6 +853,7 @@ public final class MusicXmlReader {
         boolean tieStop = false;
         Accidental accidental = null;
         int staff = 1;
+        Boolean stemUp = null;
         java.util.List<Beam> beams = new ArrayList<>();
         java.util.List<Lyric> lyrics = new ArrayList<>();
         java.util.List<Articulation> articulations = new ArrayList<>();
@@ -892,6 +893,14 @@ public final class MusicXmlReader {
                             tieStart = true;
                         } else if ("stop".equals(tieType)) {
                             tieStop = true;
+                        }
+                    }
+                    case "stem" -> {
+                        String stemText = readText(reader);
+                        if ("up".equalsIgnoreCase(stemText)) {
+                            stemUp = Boolean.TRUE;
+                        } else if ("down".equalsIgnoreCase(stemText)) {
+                            stemUp = Boolean.FALSE;
                         }
                     }
                     case "staccato" -> articulations.add(Articulation.STACCATO);
@@ -952,7 +961,8 @@ public final class MusicXmlReader {
                 .lyrics(lyrics)
                 .articulations(articulations)
                 .slurs(slurs)
-                .tuplets(tuplets);
+                .tuplets(tuplets)
+                .stemUp(stemUp);
         if (accidental != null) {
             nb.displayedAccidental(accidental);
         }

@@ -1489,24 +1489,69 @@ public final class Engraver {
                               MusicElement element, double noteX, double staffY,
                               Clef clef, LayoutOptions options) {
         if (element instanceof Note note) {
+            int step = staffStep(note.pitch(), clef);
+            boolean stemUp = note.stemUp().orElse(step >= MIDDLE_LINE_STAFF_STEP);
             placeNote(glyphs, beams, ties, slurs, tuplets, openBeams, tieCandidates, slurCandidates,
-                    tupletCandidates, note, noteX, staffY, clef, options, false);
+                    tupletCandidates, note, noteX, staffY, clef, options, false, true, stemUp);
         } else if (element instanceof Chord chord) {
-            // MusicXML puts <beam> elements only on one representative note
-            // per chord (usually the first); the other stacked notes carry
-            // an empty beams() list even though the whole chord is beamed.
-            // Without this, those notes are mistaken for unbeamed and each
-            // draws its own stray flag glyph next to the real beam.
+            // A stacked chord shares exactly one stem (and one beam/flag)
+            // across all its notes, anchored at whichever notehead sits
+            // closest to the stem tip - not one independent stem per note.
+            // MusicXML also puts <beam> elements only on one representative
+            // note per chord (usually the first non-<chord/>-tagged one);
+            // the other stacked notes carry an empty beams() list even
+            // though the whole chord is beamed.
+            List<Note> notes = chord.notes();
+            Note outerNote = notes.get(0);
+            int outerDist = -1;
+            Note beamDataNote = null;
             boolean chordBeamed = false;
-            for (Note note : chord.notes()) {
+            Boolean explicitStemUp = null;
+            for (Note note : notes) {
+                int step = staffStep(note.pitch(), clef);
+                int dist = Math.abs(step - MIDDLE_LINE_STAFF_STEP);
+                if (dist > outerDist) {
+                    outerDist = dist;
+                    outerNote = note;
+                }
                 if (note.isBeamed()) {
                     chordBeamed = true;
-                    break;
+                    if (beamDataNote == null) {
+                        beamDataNote = note;
+                    }
+                }
+                if (explicitStemUp == null && note.stemUp().isPresent()) {
+                    explicitStemUp = note.stemUp().get();
                 }
             }
-            for (Note note : chord.notes()) {
+            // All notes in a chord (and every note across a whole beamed
+            // group) must share one stem direction. MusicXML fixes this
+            // explicitly via <stem> on every note precisely so a pitch-based
+            // heuristic - which can disagree note-to-note as pitch varies
+            // across a beam run - never has to guess; prefer it when present.
+            boolean stemUp = explicitStemUp != null
+                    ? explicitStemUp
+                    : staffStep(outerNote.pitch(), clef) >= MIDDLE_LINE_STAFF_STEP;
+            // The stem-responsible note is whichever carries the real beam
+            // data when beamed; otherwise the notehead nearest the stem tip
+            // (largest staffStep - i.e. lowest pitch - for stem-up, or
+            // smallest - highest pitch - for stem-down).
+            Note stemNote = beamDataNote;
+            if (stemNote == null) {
+                stemNote = notes.get(0);
+                int nearStep = staffStep(stemNote.pitch(), clef);
+                for (Note note : notes) {
+                    int step = staffStep(note.pitch(), clef);
+                    if (stemUp ? step > nearStep : step < nearStep) {
+                        nearStep = step;
+                        stemNote = note;
+                    }
+                }
+            }
+            for (Note note : notes) {
                 placeNote(glyphs, beams, ties, slurs, tuplets, openBeams, tieCandidates, slurCandidates,
-                        tupletCandidates, note, noteX, staffY, clef, options, chordBeamed);
+                        tupletCandidates, note, noteX, staffY, clef, options, chordBeamed, note == stemNote,
+                        stemUp);
             }
         } else if (element instanceof Rest rest) {
             double gap = options.staffLineGap();
@@ -1731,7 +1776,7 @@ public final class Engraver {
                            Map<Integer, BeamRun> openBeams, Map<String, PlacedNote> tieCandidates,
                            Map<Integer, SlurStart> slurCandidates, Map<Integer, TupletRun> tupletCandidates,
                            Note note, double noteX, double staffY, Clef clef, LayoutOptions options,
-                           boolean chordBeamed) {
+                           boolean chordBeamed, boolean isStemResponsible, boolean stemUp) {
         double gap = options.staffLineGap();
         int staffStep = staffStep(note.pitch(), clef);
         double y = staffY + staffStep * (gap / 2.0);
@@ -1751,9 +1796,11 @@ public final class Engraver {
 
         glyphs.add(new GlyphPlacement(noteX, y, noteheadGlyph(note.type()), staffStep));
 
-        boolean stemUp = staffStep >= MIDDLE_LINE_STAFF_STEP;
-        Glyph stem = stemGlyph(note.type(), staffStep);
-        if (stem != null) {
+        Glyph stem = stemGlyph(note.type(), stemUp);
+        // A chord shares one stem across all its notes, drawn once by
+        // whichever note is stem-responsible (see placeElement); the other
+        // stacked notes must not each draw their own independent stem.
+        if (stem != null && isStemResponsible) {
             glyphs.add(new GlyphPlacement(noteX, y, stem, staffStep));
         }
 
@@ -1781,14 +1828,14 @@ public final class Engraver {
         // representative note's own placeNote call already drives
         // processBeams for the whole group.
         boolean beamed = note.isBeamed() || chordBeamed;
-        if (!beamed && stem != null) {
+        if (!beamed && stem != null && isStemResponsible) {
             Glyph flag = flagGlyph(note.type(), stemUp);
             if (flag != null) {
                 double stemTipY = stemUp ? y - gap * STEM_LENGTH_GAPS : y + gap * STEM_LENGTH_GAPS;
                 double stemTipX = stemUp ? noteX + noteheadHalfWidth(note.type(), gap) : noteX - noteheadHalfWidth(note.type(), gap);
                 glyphs.add(new GlyphPlacement(stemTipX, stemTipY, flag, staffStep));
             }
-        } else if (note.isBeamed() && stem != null) {
+        } else if (note.isBeamed() && stem != null && isStemResponsible) {
             double stemTipX = stemUp ? noteX + noteheadHalfWidth(note.type(), gap) : noteX - noteheadHalfWidth(note.type(), gap);
             double stemTipY = stemUp ? y - gap * STEM_LENGTH_GAPS : y + gap * STEM_LENGTH_GAPS;
             processBeams(beams, openBeams, note.beams(), stemTipX, stemTipY, stemUp);
@@ -1899,14 +1946,13 @@ public final class Engraver {
     }
 
     /**
-     * Choose the stem direction for a note based on its type and staff position.
-     * Whole/breve/long/maxima notes have no stem. Notes on or below the middle
-     * line get a stem up; notes above the middle line get a stem down.
+     * Choose the stem glyph for a note's type and direction. Whole/breve/
+     * long/maxima notes have no stem.
      */
-    static Glyph stemGlyph(NoteType type, int staffStep) {
+    static Glyph stemGlyph(NoteType type, boolean stemUp) {
         return switch (type) {
             case WHOLE, BREVE, LONG, MAXIMA -> null;
-            default -> staffStep >= MIDDLE_LINE_STAFF_STEP ? Glyph.STEM_UP : Glyph.STEM_DOWN;
+            default -> stemUp ? Glyph.STEM_UP : Glyph.STEM_DOWN;
         };
     }
 

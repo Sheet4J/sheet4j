@@ -22,6 +22,7 @@ public final class Note implements MusicElement {
     private final List<Slur> slurs;
     private final List<Tuplet> tuplets;
     private final TimeModification timeModification;
+    private final Boolean stemUp;
 
     private Note(Builder builder) {
         this.pitch = builder.pitch;
@@ -33,6 +34,7 @@ public final class Note implements MusicElement {
         this.displayedAccidental = builder.displayedAccidental;
         this.beams = List.copyOf(builder.beams);
         this.lyrics = List.copyOf(builder.lyrics);
+        this.stemUp = builder.stemUp;
         this.staff = builder.staff;
         this.articulations = List.copyOf(builder.articulations);
         this.slurs = List.copyOf(builder.slurs);
@@ -137,6 +139,18 @@ public final class Note implements MusicElement {
         return java.util.Optional.ofNullable(timeModification);
     }
 
+    /**
+     * The explicit stem direction from MusicXML {@code <stem>up|down</stem>},
+     * when present. Notes in the same beamed group commonly span a pitch
+     * range where a purely pitch-based heuristic would pick inconsistent
+     * directions note-to-note; well-formed MusicXML always fixes the whole
+     * group to one direction explicitly, so the engraver should prefer this
+     * over guessing from {@link Pitch} alone.
+     */
+    public java.util.Optional<Boolean> stemUp() {
+        return java.util.Optional.ofNullable(stemUp);
+    }
+
     public static Builder builder() {
         return new Builder();
     }
@@ -156,6 +170,7 @@ public final class Note implements MusicElement {
         private java.util.List<Slur> slurs = new java.util.ArrayList<>();
         private java.util.List<Tuplet> tuplets = new java.util.ArrayList<>();
         private TimeModification timeModification;
+        private Boolean stemUp;
 
         public Builder pitch(Pitch pitch) {
             this.pitch = pitch;
@@ -249,6 +264,11 @@ public final class Note implements MusicElement {
 
         public Builder timeModification(TimeModification timeModification) {
             this.timeModification = timeModification;
+            return this;
+        }
+
+        public Builder stemUp(Boolean stemUp) {
+            this.stemUp = stemUp;
             return this;
         }
 

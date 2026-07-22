@@ -290,6 +290,9 @@ public final class MusicXmlWriter {
             if (note.timeModification().isPresent()) {
                 writeTimeModification(w, note.timeModification().get());
             }
+            if (note.stemUp().isPresent()) {
+                w.textElement("stem", note.stemUp().get() ? "up" : "down");
+            }
             if (note.staff() > 1) {
                 w.textElement("staff", Integer.toString(note.staff()));
             }
