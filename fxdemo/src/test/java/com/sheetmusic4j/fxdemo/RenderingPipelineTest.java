@@ -1,15 +1,15 @@
 package com.sheetmusic4j.fxdemo;
 
-import com.sheetmusic4j.core.model.Score;
-import com.sheetmusic4j.core.musicxml.MusicXmlReader;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
-
 import java.awt.image.BufferedImage;
 import java.io.InputStream;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+
+import com.sheetmusic4j.core.model.Score;
+import com.sheetmusic4j.core.musicxml.MusicXmlReader;
 
 /**
  * Non-comparative smoke test for the headless engraving pipeline. Ensures the
@@ -33,7 +33,7 @@ class RenderingPipelineTest {
     @Test
     void producesInk() throws Exception {
         Score score;
-        try (InputStream in = getClass().getResourceAsStream("/c-major-scale.musicxml")) {
+        try (InputStream in = getClass().getResourceAsStream("/basic/c-major-scale.musicxml")) {
             assertNotNull(in, "sample score resource must exist");
             score = new MusicXmlReader().read(in);
         }

@@ -1,4 +1,4 @@
-package com.sheetmusic4j.engraving;
+package com.sheetmusic4j.engraving.layout;
 
 /**
  * The horizontal extent of a single measure on a staff.

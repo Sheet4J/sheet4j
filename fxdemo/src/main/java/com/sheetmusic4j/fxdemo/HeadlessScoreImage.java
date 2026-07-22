@@ -7,8 +7,8 @@ import java.awt.image.BufferedImage;
 
 import com.sheetmusic4j.core.model.Score;
 import com.sheetmusic4j.engraving.Engraver;
-import com.sheetmusic4j.engraving.LayoutOptions;
-import com.sheetmusic4j.engraving.LayoutResult;
+import com.sheetmusic4j.engraving.layout.LayoutOptions;
+import com.sheetmusic4j.engraving.layout.LayoutResult;
 import com.sheetmusic4j.fxviewer.ScorePainter;
 
 /**

@@ -3,18 +3,18 @@ package com.sheetmusic4j.fxviewer;
 import java.util.EnumSet;
 import java.util.Set;
 
-import com.sheetmusic4j.engraving.BeamPlacement;
-import com.sheetmusic4j.engraving.BracketPlacement;
-import com.sheetmusic4j.engraving.Glyph;
-import com.sheetmusic4j.engraving.GlyphPlacement;
-import com.sheetmusic4j.engraving.LayoutResult;
-import com.sheetmusic4j.engraving.MarkingCategory;
-import com.sheetmusic4j.engraving.MeasureLayout;
-import com.sheetmusic4j.engraving.StaffLayout;
-import com.sheetmusic4j.engraving.SystemBarline;
-import com.sheetmusic4j.engraving.SystemLayout;
-import com.sheetmusic4j.engraving.TextPlacement;
-import com.sheetmusic4j.engraving.TiePlacement;
+import com.sheetmusic4j.engraving.placement.BeamPlacement;
+import com.sheetmusic4j.engraving.placement.BracketPlacement;
+import com.sheetmusic4j.engraving.glyph.Glyph;
+import com.sheetmusic4j.engraving.placement.GlyphPlacement;
+import com.sheetmusic4j.engraving.layout.LayoutResult;
+import com.sheetmusic4j.engraving.glyph.MarkingCategory;
+import com.sheetmusic4j.engraving.layout.MeasureLayout;
+import com.sheetmusic4j.engraving.layout.StaffLayout;
+import com.sheetmusic4j.engraving.layout.SystemBarline;
+import com.sheetmusic4j.engraving.layout.SystemLayout;
+import com.sheetmusic4j.engraving.placement.TextPlacement;
+import com.sheetmusic4j.engraving.placement.TiePlacement;
 
 /**
  * Surface-agnostic painting of a {@link LayoutResult}. All drawing goes through a

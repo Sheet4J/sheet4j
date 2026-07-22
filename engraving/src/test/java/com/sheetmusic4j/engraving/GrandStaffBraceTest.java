@@ -4,6 +4,12 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import com.sheetmusic4j.engraving.layout.LayoutOptions;
+import com.sheetmusic4j.engraving.layout.LayoutResult;
+import com.sheetmusic4j.engraving.layout.StaffLayout;
+import com.sheetmusic4j.engraving.layout.SystemLayout;
+import com.sheetmusic4j.engraving.placement.BracketPlacement;
 import org.junit.jupiter.api.Test;
 
 import com.sheetmusic4j.core.model.Attributes;
@@ -25,7 +31,7 @@ import com.sheetmusic4j.core.model.TimeSignature;
 /**
  * Tests for the implicit grand-staff brace emitted by Task 6.
  */
-class EngraverGrandStaffBraceTest {
+class GrandStaffBraceTest {
 
     private static final int DIVISIONS = 1;
 

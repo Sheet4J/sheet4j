@@ -1,4 +1,7 @@
-package com.sheetmusic4j.engraving;
+package com.sheetmusic4j.engraving.placement;
+
+import com.sheetmusic4j.engraving.glyph.Glyph;
+import com.sheetmusic4j.engraving.glyph.MarkingCategory;
 
 /**
  * A single positioned glyph.

@@ -4,6 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.util.List;
 
+import com.sheetmusic4j.engraving.layout.LayoutOptions;
+import com.sheetmusic4j.engraving.layout.LayoutResult;
+import com.sheetmusic4j.engraving.layout.StaffLayout;
 import org.junit.jupiter.api.Test;
 
 import com.sheetmusic4j.core.model.Attributes;
@@ -19,7 +22,7 @@ import com.sheetmusic4j.core.model.Score;
 import com.sheetmusic4j.core.model.Step;
 import com.sheetmusic4j.core.model.TimeSignature;
 
-class EngraverAlignmentTest {
+class AlignmentTest {
 
     private static Score twoPartScore() {
         int divisions = 1;

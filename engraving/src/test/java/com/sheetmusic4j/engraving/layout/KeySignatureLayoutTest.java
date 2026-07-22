@@ -1,7 +1,9 @@
-package com.sheetmusic4j.engraving;
+package com.sheetmusic4j.engraving.layout;
 
 import com.sheetmusic4j.core.model.Clef;
 import com.sheetmusic4j.core.model.KeySignature;
+import com.sheetmusic4j.engraving.glyph.Glyph;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -13,7 +15,7 @@ class KeySignatureLayoutTest {
     void sharpsOnTreble() {
         int[] pos = KeySignatureLayout.positions(Clef.treble(), new KeySignature(3));
         assertArrayEquals(new int[]{0, 3, -1}, pos);
-        assertEquals(Glyph.ACCIDENTAL_SHARP, KeySignatureLayout.glyphFor(new KeySignature(3)));
+        Assertions.assertEquals(Glyph.ACCIDENTAL_SHARP, KeySignatureLayout.glyphFor(new KeySignature(3)));
     }
 
     @Test

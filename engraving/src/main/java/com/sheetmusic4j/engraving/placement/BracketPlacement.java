@@ -1,4 +1,4 @@
-package com.sheetmusic4j.engraving;
+package com.sheetmusic4j.engraving.placement;
 
 /**
  * A vertical grouping mark drawn at the left of a system that visually

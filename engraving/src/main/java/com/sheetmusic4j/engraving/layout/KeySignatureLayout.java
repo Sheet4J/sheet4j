@@ -1,8 +1,10 @@
-package com.sheetmusic4j.engraving;
+package com.sheetmusic4j.engraving.layout;
 
 import com.sheetmusic4j.core.model.Clef;
 import com.sheetmusic4j.core.model.ClefSign;
 import com.sheetmusic4j.core.model.KeySignature;
+import com.sheetmusic4j.engraving.glyph.Glyph;
+import com.sheetmusic4j.engraving.placement.GlyphPlacement;
 
 /**
  * Compute the staff-step positions for the accidentals in a

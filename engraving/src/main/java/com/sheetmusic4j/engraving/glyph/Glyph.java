@@ -1,4 +1,8 @@
-package com.sheetmusic4j.engraving;
+package com.sheetmusic4j.engraving.glyph;
+
+import com.sheetmusic4j.engraving.placement.BeamPlacement;
+import com.sheetmusic4j.engraving.placement.BracketPlacement;
+import com.sheetmusic4j.engraving.placement.GlyphPlacement;
 
 /**
  * A minimal, renderer-agnostic set of musical glyphs. Values loosely correspond

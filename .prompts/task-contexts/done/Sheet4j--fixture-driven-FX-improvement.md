@@ -397,7 +397,7 @@ Each row is its own commit; the PR title is
 
 **After Step 3:**
 - `Engraver.layout(<long score>).systems().size() > 1` (new unit test
-  in `EngraverSystemBreakTest`).
+  in `SystemBreakTest`).
 - Every existing fixture still passes; the `do-re-mi` report shows
   multiple visually separated rows of staff.
 

@@ -5,10 +5,10 @@ import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
 
-import com.sheetmusic4j.engraving.GlyphPlacement;
-import com.sheetmusic4j.engraving.LayoutResult;
-import com.sheetmusic4j.engraving.MeasureLayout;
-import com.sheetmusic4j.engraving.StaffLayout;
+import com.sheetmusic4j.engraving.placement.GlyphPlacement;
+import com.sheetmusic4j.engraving.layout.LayoutResult;
+import com.sheetmusic4j.engraving.layout.MeasureLayout;
+import com.sheetmusic4j.engraving.layout.StaffLayout;
 import com.sheetmusic4j.fxdemo.ImageSimilarity;
 
 /**

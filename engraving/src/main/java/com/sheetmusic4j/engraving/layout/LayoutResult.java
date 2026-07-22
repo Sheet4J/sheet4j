@@ -1,4 +1,6 @@
-package com.sheetmusic4j.engraving;
+package com.sheetmusic4j.engraving.layout;
+
+import com.sheetmusic4j.engraving.placement.TextPlacement;
 
 import java.util.List;
 

@@ -344,7 +344,7 @@ arbitrary categories. Extension only:
     last element.
   - `directionsAbovePushStavesDown` — layout with vs. without an
     above-direction; assert the first staff `y` moves.
-- Extend `EngraverTextBlockTest` if the title y baseline changes.
+- Extend `TextBlockTest` if the title y baseline changes.
 
 **Viewer**
 - Extend `ScorePainterTextVisibilityTest` (from Task 1/2):

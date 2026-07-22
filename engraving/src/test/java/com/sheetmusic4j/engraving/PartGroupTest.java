@@ -5,6 +5,14 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import com.sheetmusic4j.engraving.glyph.MarkingCategory;
+import com.sheetmusic4j.engraving.layout.LayoutOptions;
+import com.sheetmusic4j.engraving.layout.LayoutResult;
+import com.sheetmusic4j.engraving.layout.StaffLayout;
+import com.sheetmusic4j.engraving.layout.SystemLayout;
+import com.sheetmusic4j.engraving.placement.BracketPlacement;
+import com.sheetmusic4j.engraving.placement.TextPlacement;
 import org.junit.jupiter.api.Test;
 
 import com.sheetmusic4j.core.model.Attributes;
@@ -25,7 +33,7 @@ import com.sheetmusic4j.core.model.TimeSignature;
 /**
  * Tests for the engraver's handling of {@link PartGroup part groups}.
  */
-class EngraverPartGroupTest {
+class PartGroupTest {
 
     private static final int DIVISIONS = 1;
 

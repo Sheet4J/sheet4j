@@ -1,4 +1,4 @@
-package com.sheetmusic4j.engraving;
+package com.sheetmusic4j.engraving.placement;
 
 /**
  * A positioned tie connecting two notes of the same pitch.

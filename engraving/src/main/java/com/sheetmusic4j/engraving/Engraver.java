@@ -30,6 +30,10 @@ import com.sheetmusic4j.core.model.Placement;
 import com.sheetmusic4j.core.model.Rest;
 import com.sheetmusic4j.core.model.Score;
 import com.sheetmusic4j.core.model.TimeSignature;
+import com.sheetmusic4j.engraving.glyph.Glyph;
+import com.sheetmusic4j.engraving.glyph.MarkingCategory;
+import com.sheetmusic4j.engraving.layout.*;
+import com.sheetmusic4j.engraving.placement.*;
 
 /**
  * Turns a {@link Score} into a framework-agnostic {@link LayoutResult}.
@@ -158,7 +162,7 @@ public final class Engraver {
     private static final double BRACKET_COLUMN_STEP_GAPS = 1.2;
 
     /**
-     * Character-to-em ratio used by both {@link ScorePainter}'s alignment
+     * Character-to-em ratio used by both {@code ScorePainter}'s alignment
      * fallback and {@link #computeLabelReserve}. Keep in sync with the value
      * in {@code ScorePainter.drawText}.
      */
@@ -681,7 +685,7 @@ public final class Engraver {
      *
      * <p>Width estimate for labels matches the
      * {@code 0.55 * fontSize * length} heuristic used by
-     * {@link ScorePainter} for right/center alignment, then adds a small
+     * {@code ScorePainter} for right/center alignment, then adds a small
      * padding so labels never abut the system barline. Group-name /
      * abbreviation lengths participate in the same longest-label search.
      * When any group is declared we additionally reserve room for the

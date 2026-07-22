@@ -6,6 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import com.sheetmusic4j.engraving.glyph.MarkingCategory;
+import com.sheetmusic4j.engraving.layout.LayoutOptions;
+import com.sheetmusic4j.engraving.layout.LayoutResult;
+import com.sheetmusic4j.engraving.layout.StaffLayout;
+import com.sheetmusic4j.engraving.placement.TextPlacement;
 import org.junit.jupiter.api.Test;
 
 import com.sheetmusic4j.core.model.Attributes;
@@ -25,7 +31,7 @@ import com.sheetmusic4j.core.model.TimeSignature;
 /**
  * Tests for the instrument label emission introduced in Task 6.
  */
-class EngraverPartLabelTest {
+class PartLabelTest {
 
     private static final int DIVISIONS = 1;
 

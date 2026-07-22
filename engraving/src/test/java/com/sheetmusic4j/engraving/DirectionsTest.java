@@ -5,6 +5,14 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import com.sheetmusic4j.engraving.glyph.Glyph;
+import com.sheetmusic4j.engraving.glyph.MarkingCategory;
+import com.sheetmusic4j.engraving.layout.LayoutOptions;
+import com.sheetmusic4j.engraving.layout.LayoutResult;
+import com.sheetmusic4j.engraving.layout.StaffLayout;
+import com.sheetmusic4j.engraving.placement.GlyphPlacement;
+import com.sheetmusic4j.engraving.placement.TextPlacement;
 import org.junit.jupiter.api.Test;
 
 import com.sheetmusic4j.core.model.Attributes;
@@ -25,7 +33,7 @@ import com.sheetmusic4j.core.model.Score;
 import com.sheetmusic4j.core.model.Step;
 import com.sheetmusic4j.core.model.TimeSignature;
 
-class EngraverDirectionsTest {
+class DirectionsTest {
 
     private static final int DIVISIONS = 1;
 

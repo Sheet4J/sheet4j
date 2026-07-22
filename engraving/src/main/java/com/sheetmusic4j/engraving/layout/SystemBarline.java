@@ -1,4 +1,4 @@
-package com.sheetmusic4j.engraving;
+package com.sheetmusic4j.engraving.layout;
 
 /**
  * A vertical barline that spans multiple staves at the left edge (or any

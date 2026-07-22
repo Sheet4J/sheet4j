@@ -13,7 +13,7 @@
     <artifactId>fxdemo</artifactId>
     <packaging>jar</packaging>
 
-    <name>Sheet4j :: FX Demo</name>
+    <name>Sheetmusic4j :: FX Demo</name>
     <description>Standalone JavaFX demo application to test the fxviewer: load MusicXML/MIDI files, inspect the score, and view debug information.</description>
 
     <properties>

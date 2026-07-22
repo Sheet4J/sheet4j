@@ -182,6 +182,11 @@ public final class MusicXmlReader {
         // ranges. Malformed groups (stop without start, unclosed at EOF)
         // are silently dropped.
         Map<Integer, PendingGroup> openGroups = new LinkedHashMap<>();
+        // Number of <score-part> entries seen so far inside <part-list>.
+        // Drives inclusive part-index bookkeeping for <part-group> sentinels
+        // — <part> elements themselves appear only after <part-list>, so we
+        // cannot use partOrder.size() here.
+        int[] scorePartCount = {0};
 
         while (reader.hasNext()) {
             int event = reader.next();
@@ -192,8 +197,11 @@ public final class MusicXmlReader {
                     case "movement-title" -> score.movementTitle(readText(reader));
                     case "identification" -> readIdentification(reader, score);
                     case "credit" -> readCredit(reader, score);
-                    case "score-part" -> readScorePart(reader, scoreParts);
-                    case "part-group" -> handlePartGroup(reader, score, openGroups, partOrder.size());
+                    case "score-part" -> {
+                        readScorePart(reader, scoreParts);
+                        scorePartCount[0]++;
+                    }
+                    case "part-group" -> handlePartGroup(reader, score, openGroups, scorePartCount[0]);
                     case "part" -> {
                         String id = reader.getAttributeValue(null, "id");
                         ScorePartInfo info = scoreParts.get(id);

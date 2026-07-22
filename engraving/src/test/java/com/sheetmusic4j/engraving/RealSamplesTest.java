@@ -8,6 +8,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
+
+import com.sheetmusic4j.engraving.glyph.MarkingCategory;
+import com.sheetmusic4j.engraving.layout.LayoutOptions;
+import com.sheetmusic4j.engraving.layout.LayoutResult;
+import com.sheetmusic4j.engraving.layout.SystemLayout;
+import com.sheetmusic4j.engraving.placement.BracketPlacement;
 import org.junit.jupiter.api.Test;
 
 import com.sheetmusic4j.core.model.GroupSymbol;
@@ -21,7 +27,7 @@ import com.sheetmusic4j.core.musicxml.MusicXmlReader;
  * are guarded with {@link org.junit.jupiter.api.Assumptions#assumeTrue}:
  * builds that only ship the engraving module still run cleanly.
  */
-class EngraverRealSamplesTest {
+class RealSamplesTest {
 
     private static Path findSample(String fileName) {
         String[] candidates = {

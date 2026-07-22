@@ -1,4 +1,7 @@
-package com.sheetmusic4j.engraving;
+package com.sheetmusic4j.engraving.placement;
+
+import com.sheetmusic4j.engraving.glyph.MarkingCategory;
+import com.sheetmusic4j.engraving.layout.StaffLayout;
 
 /**
  * A piece of free-form text (title, subtitle, composer credit, direction word,

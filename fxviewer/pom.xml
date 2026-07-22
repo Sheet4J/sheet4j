@@ -13,7 +13,7 @@
     <artifactId>fxviewer</artifactId>
     <packaging>jar</packaging>
 
-    <name>Sheetmusic4J :: Render FX</name>
+    <name>Sheetmusic4J :: FX Viewer</name>
     <description>JavaFX Canvas rendering of a LayoutResult using a SMuFL-compliant music font.</description>
 
     <dependencies>

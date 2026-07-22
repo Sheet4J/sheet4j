@@ -1,4 +1,7 @@
-package com.sheetmusic4j.engraving;
+package com.sheetmusic4j.engraving.glyph;
+
+import com.sheetmusic4j.engraving.placement.TextPlacement;
+import com.sheetmusic4j.engraving.placement.GlyphPlacement;
 
 /**
  * Semantic classification for both {@link TextPlacement text} and

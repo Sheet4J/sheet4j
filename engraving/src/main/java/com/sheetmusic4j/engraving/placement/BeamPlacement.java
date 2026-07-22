@@ -1,4 +1,4 @@
-package com.sheetmusic4j.engraving;
+package com.sheetmusic4j.engraving.placement;
 
 /**
  * A positioned beam segment connecting the stem tips of two beamed notes.

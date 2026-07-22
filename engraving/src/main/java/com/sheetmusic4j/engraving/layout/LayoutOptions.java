@@ -1,4 +1,4 @@
-package com.sheetmusic4j.engraving;
+package com.sheetmusic4j.engraving.layout;
 
 /**
  * Tunable parameters controlling how a score is laid out. All measurements are

@@ -1,9 +1,11 @@
-package com.sheetmusic4j.engraving;
+package com.sheetmusic4j.engraving.layout;
 
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import com.sheetmusic4j.engraving.Engraver;
 import org.junit.jupiter.api.Test;
 
 import com.sheetmusic4j.core.model.Attributes;
@@ -22,7 +24,7 @@ import com.sheetmusic4j.core.model.TimeSignature;
 /**
  * Tests for the system-wide left barline emitted by Task 6.
  */
-class EngraverSystemBarlineTest {
+class SystemBarlineTest {
 
     private static final int DIVISIONS = 1;
 

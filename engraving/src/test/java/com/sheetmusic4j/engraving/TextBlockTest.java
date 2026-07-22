@@ -3,6 +3,11 @@ package com.sheetmusic4j.engraving;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import com.sheetmusic4j.engraving.glyph.MarkingCategory;
+import com.sheetmusic4j.engraving.layout.LayoutOptions;
+import com.sheetmusic4j.engraving.layout.LayoutResult;
+import com.sheetmusic4j.engraving.placement.TextPlacement;
 import org.junit.jupiter.api.Test;
 
 import com.sheetmusic4j.core.model.Attributes;
@@ -19,7 +24,7 @@ import com.sheetmusic4j.core.model.Score;
 import com.sheetmusic4j.core.model.Step;
 import com.sheetmusic4j.core.model.TimeSignature;
 
-class EngraverTextBlockTest {
+class TextBlockTest {
 
     private static Score minimalScoreWithCreators(Creator... creators) {
         Score.Builder builder = baseScoreBuilder("Symphony", null);

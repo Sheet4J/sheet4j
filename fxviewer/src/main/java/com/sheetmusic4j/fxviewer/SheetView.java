@@ -4,10 +4,11 @@ import java.util.EnumSet;
 
 import com.sheetmusic4j.core.model.Score;
 import com.sheetmusic4j.engraving.Engraver;
-import com.sheetmusic4j.engraving.LayoutOptions;
-import com.sheetmusic4j.engraving.LayoutResult;
-import com.sheetmusic4j.engraving.MarkingCategory;
+import com.sheetmusic4j.engraving.layout.LayoutOptions;
+import com.sheetmusic4j.engraving.layout.LayoutResult;
+import com.sheetmusic4j.engraving.glyph.MarkingCategory;
 
+import com.sheetmusic4j.engraving.placement.BracketPlacement;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.DoubleProperty;
 import javafx.beans.property.SimpleBooleanProperty;
@@ -112,7 +113,7 @@ public final class SheetView extends Region {
     }
 
     /**
-     * JavaFX property controlling whether {@link com.sheetmusic4j.engraving.BracketPlacement
+     * JavaFX property controlling whether {@link BracketPlacement
      * bracket placements} (both implicit grand-staff braces and
      * {@code <part-group>}-driven brackets) are drawn. Defaults to
      * {@code true}; mutations trigger a rebuild.

@@ -9,15 +9,15 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
-import com.sheetmusic4j.engraving.BracketPlacement;
-import com.sheetmusic4j.engraving.Glyph;
-import com.sheetmusic4j.engraving.GlyphPlacement;
-import com.sheetmusic4j.engraving.LayoutResult;
-import com.sheetmusic4j.engraving.MarkingCategory;
-import com.sheetmusic4j.engraving.StaffLayout;
-import com.sheetmusic4j.engraving.SystemBarline;
-import com.sheetmusic4j.engraving.SystemLayout;
-import com.sheetmusic4j.engraving.TextPlacement;
+import com.sheetmusic4j.engraving.placement.BracketPlacement;
+import com.sheetmusic4j.engraving.glyph.Glyph;
+import com.sheetmusic4j.engraving.placement.GlyphPlacement;
+import com.sheetmusic4j.engraving.layout.LayoutResult;
+import com.sheetmusic4j.engraving.glyph.MarkingCategory;
+import com.sheetmusic4j.engraving.layout.StaffLayout;
+import com.sheetmusic4j.engraving.layout.SystemBarline;
+import com.sheetmusic4j.engraving.layout.SystemLayout;
+import com.sheetmusic4j.engraving.placement.TextPlacement;
 
 class ScorePainterTextVisibilityTest {
 

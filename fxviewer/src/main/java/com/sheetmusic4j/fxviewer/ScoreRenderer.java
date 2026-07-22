@@ -2,9 +2,10 @@ package com.sheetmusic4j.fxviewer;
 
 import java.util.Set;
 
-import com.sheetmusic4j.engraving.LayoutResult;
-import com.sheetmusic4j.engraving.MarkingCategory;
+import com.sheetmusic4j.engraving.layout.LayoutResult;
+import com.sheetmusic4j.engraving.glyph.MarkingCategory;
 
+import com.sheetmusic4j.engraving.placement.BracketPlacement;
 import javafx.scene.canvas.GraphicsContext;
 
 /**
@@ -40,7 +41,7 @@ public final class ScoreRenderer {
     }
 
     /**
-     * Toggle the visibility of all {@link com.sheetmusic4j.engraving.BracketPlacement bracket placements}
+     * Toggle the visibility of all {@link BracketPlacement bracket placements}
      * on the underlying painter. See {@link ScorePainter#setBracketsVisible(boolean)}.
      *
      * @param visible whether brackets should be drawn

@@ -1,6 +1,6 @@
 package com.sheetmusic4j.fxviewer;
 
-import com.sheetmusic4j.engraving.Glyph;
+import com.sheetmusic4j.engraving.glyph.Glyph;
 
 /**
  * Renderer-agnostic mapping from Sheet4j's {@link Glyph} enum to
