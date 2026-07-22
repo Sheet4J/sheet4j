@@ -397,7 +397,6 @@ public final class ScorePainter {
         // too shallow to clear that peak, so take whichever is more extreme
         // of the default shallow-arc bend and the clearance actually needed
         // to pass every notehead the slur spans (tracked in clearY).
-        double midX = (slur.x1() + slur.x2()) / 2.0;
         double clearance = gap * 0.8;
         double midY;
         if (slur.curveUp()) {
