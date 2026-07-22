@@ -1,16 +1,14 @@
 package com.sheetmusic4j.fxdemo.reference;
 
-import java.awt.Color;
-import java.awt.Graphics2D;
+import javax.imageio.ImageIO;
+import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-import javax.imageio.ImageIO;
-
 /**
- * Writes a self-contained HTML report showing the rendered Sheet4j engraving
+ * Writes a self-contained HTML report showing the rendered Sheetmusic4J engraving
  * side by side with the reference image and the per-measure diagnostic table.
  *
  * <p>The reference image is obtained by rasterizing the sibling PDF of the
@@ -29,22 +27,22 @@ public final class DiffReportWriter {
     /**
      * Write a diff report and return the path to the produced HTML file.
      *
-     * @param outputDir           directory where {@code rendered.png}, {@code reference.png},
-     *                            {@code diff.png} and {@code report.html} are written
-     * @param name                fixture name (used only in the report header)
-     * @param rendered            the Sheet4j-rendered image
-     * @param reference           the reference image
-     * @param referencePageCount  number of PDF pages the reference was stitched from
-     *                            (0 or negative to omit the count from the caption)
-     * @param renderedSystems     number of engraved systems (rows of staves) in the
-     *                            rendered image; when non-positive the value is omitted
-     * @param diagnostic          the diagnostic to summarize in the report
+     * @param outputDir          directory where {@code rendered.png}, {@code reference.png},
+     *                           {@code diff.png} and {@code report.html} are written
+     * @param name               fixture name (used only in the report header)
+     * @param rendered           the Sheetmusic4J-rendered image
+     * @param reference          the reference image
+     * @param referencePageCount number of PDF pages the reference was stitched from
+     *                           (0 or negative to omit the count from the caption)
+     * @param renderedSystems    number of engraved systems (rows of staves) in the
+     *                           rendered image; when non-positive the value is omitted
+     * @param diagnostic         the diagnostic to summarize in the report
      * @return path to the generated {@code report.html} file
      * @throws IOException if the output directory or report files cannot be written
      */
-     public static Path write(Path outputDir, String name, BufferedImage rendered, BufferedImage reference,
-                              int referencePageCount, int renderedSystems,
-                              DiagnosticComparator.Diagnostic diagnostic) throws IOException {
+    public static Path write(Path outputDir, String name, BufferedImage rendered, BufferedImage reference,
+                             int referencePageCount, int renderedSystems,
+                             DiagnosticComparator.Diagnostic diagnostic) throws IOException {
         Files.createDirectories(outputDir);
 
         Path renderedPng = outputDir.resolve("rendered.png");
@@ -58,7 +56,7 @@ public final class DiffReportWriter {
 
         StringBuilder sb = new StringBuilder();
         sb.append("<!DOCTYPE html>\n<html><head><meta charset=\"UTF-8\">\n");
-        sb.append("<title>Sheet4j diff report: ").append(escape(name)).append("</title>\n");
+        sb.append("<title>Sheetmusic4J diff report: ").append(escape(name)).append("</title>\n");
         sb.append("<style>\n")
                 .append("body { font-family: sans-serif; margin: 16px; }\n")
                 .append("h1 { font-size: 18px; }\n")
@@ -73,7 +71,7 @@ public final class DiffReportWriter {
                 .append(".summary { font-size: 13px; margin-bottom: 12px; }\n")
                 .append("</style>\n</head><body>\n");
 
-        sb.append("<h1>Sheet4j diff: ").append(escape(name)).append("</h1>\n");
+        sb.append("<h1>Sheetmusic4J diff: ").append(escape(name)).append("</h1>\n");
         sb.append("<div class=\"summary\">\n")
                 .append("Overall similarity: <b>").append(format(diagnostic.overallSimilarity())).append("</b> &middot; ")
                 .append("Rendered ink: ").append(format(diagnostic.renderedInkRatio())).append(" &middot; ")
@@ -89,7 +87,7 @@ public final class DiffReportWriter {
         }
 
         sb.append("<div class=\"row\">\n")
-                .append("  <div class=\"pane\"><h3>Sheet4j rendering</h3><img src=\"rendered.png\"></div>\n")
+                .append("  <div class=\"pane\"><h3>Sheetmusic4J rendering</h3><img src=\"rendered.png\"></div>\n")
                 .append("  <div class=\"pane\"><h3>").append(escape(referenceCaption(referencePageCount))).append("</h3><img src=\"reference.png\"></div>\n")
                 .append("  <div class=\"pane\"><h3>Absolute pixel diff</h3><img src=\"diff.png\"></div>\n")
                 .append("</div>\n");

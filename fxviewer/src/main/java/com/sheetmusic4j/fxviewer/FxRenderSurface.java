@@ -71,6 +71,14 @@ public final class FxRenderSurface implements RenderSurface {
     }
 
     @Override
+    public void strokeQuadCurve(double x1, double y1, double cx, double cy, double x2, double y2) {
+        gc.beginPath();
+        gc.moveTo(x1, y1);
+        gc.quadraticCurveTo(cx, cy, x2, y2);
+        gc.stroke();
+    }
+
+    @Override
     public void strokeText(String text, double x, double y) {
         gc.strokeText(text, x, y);
     }

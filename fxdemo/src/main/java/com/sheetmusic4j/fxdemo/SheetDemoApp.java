@@ -1,6 +1,41 @@
 package com.sheetmusic4j.fxdemo;
 
-import java.awt.Color;
+import com.dlsc.pdfviewfx.PDFView;
+import com.sheetmusic4j.core.io.ScoreFile;
+import com.sheetmusic4j.core.model.Score;
+import com.sheetmusic4j.engraving.Engraver;
+import com.sheetmusic4j.engraving.glyph.MarkingCategory;
+import com.sheetmusic4j.engraving.layout.LayoutOptions;
+import com.sheetmusic4j.engraving.layout.LayoutResult;
+import com.sheetmusic4j.fxdemo.reference.DiagnosticComparator;
+import com.sheetmusic4j.fxdemo.reference.DiffReportWriter;
+import com.sheetmusic4j.fxdemo.reference.ImageStack;
+import com.sheetmusic4j.fxdemo.reference.PdfRasterizer;
+import com.sheetmusic4j.fxviewer.SheetView;
+import javafx.application.Application;
+import javafx.application.Platform;
+import javafx.concurrent.Task;
+import javafx.geometry.Insets;
+import javafx.scene.Scene;
+import javafx.scene.control.*;
+import javafx.scene.control.Button;
+import javafx.scene.control.Label;
+import javafx.scene.control.Menu;
+import javafx.scene.control.MenuBar;
+import javafx.scene.control.MenuItem;
+import javafx.scene.control.ScrollPane;
+import javafx.scene.control.TextArea;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyCodeCombination;
+import javafx.scene.input.KeyCombination;
+import javafx.scene.layout.BorderPane;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.web.WebView;
+import javafx.stage.FileChooser;
+import javafx.stage.Stage;
+
+import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStream;
@@ -10,50 +45,10 @@ import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
 
-import com.dlsc.pdfviewfx.PDFView;
-import com.sheetmusic4j.core.io.ScoreFile;
-import com.sheetmusic4j.core.model.Score;
-import com.sheetmusic4j.engraving.Engraver;
-import com.sheetmusic4j.engraving.layout.LayoutOptions;
-import com.sheetmusic4j.engraving.layout.LayoutResult;
-import com.sheetmusic4j.engraving.glyph.MarkingCategory;
-import com.sheetmusic4j.fxdemo.reference.DiagnosticComparator;
-import com.sheetmusic4j.fxdemo.reference.DiffReportWriter;
-import com.sheetmusic4j.fxdemo.reference.ImageStack;
-import com.sheetmusic4j.fxdemo.reference.PdfRasterizer;
-import com.sheetmusic4j.fxviewer.SheetView;
-
-import javafx.application.Application;
-import javafx.application.Platform;
-import javafx.concurrent.Task;
-import javafx.geometry.Insets;
-import javafx.scene.Scene;
-import javafx.scene.control.Alert;
-import javafx.scene.control.Button;
-import javafx.scene.control.CheckMenuItem;
-import javafx.scene.control.Label;
-import javafx.scene.control.Menu;
-import javafx.scene.control.MenuBar;
-import javafx.scene.control.MenuItem;
-import javafx.scene.control.Separator;
-import javafx.scene.control.ScrollPane;
-import javafx.scene.control.SeparatorMenuItem;
-import javafx.scene.control.SplitPane;
-import javafx.scene.control.TextArea;
-import javafx.scene.layout.Priority;
-import javafx.scene.input.KeyCode;
-import javafx.scene.input.KeyCodeCombination;
-import javafx.scene.input.KeyCombination;
-import javafx.scene.layout.BorderPane;
-import javafx.scene.layout.HBox;
-import javafx.scene.web.WebView;
-import javafx.stage.FileChooser;
-import javafx.stage.Stage;
-
 /**
- * Standalone demo/testbed for the Sheet4j {@link SheetView}. Provides a File menu
+ * Standalone demo/testbed for the Sheetmusic4J {@link SheetView}. Provides a File menu
  * to open MusicXML/MIDI scores, a live rendering area, a debug panel, an
- * optional PDF-companion pane, and a "Diff" pane that compares the Sheet4j
+ * optional PDF-companion pane, and a "Diff" pane that compares the Sheetmusic4J
  * engraving against the rasterized sibling PDF.
  */
 public final class SheetDemoApp extends Application {
@@ -88,6 +83,33 @@ public final class SheetDemoApp extends Application {
     private Path currentFile;
     private Score currentScore;
 
+    private static LayoutOptions layoutOptions() {
+        LayoutOptions defaults = LayoutOptions.defaults();
+        return new LayoutOptions(
+                defaults.staffLineGap(),
+                defaults.staffSpacing(),
+                DIFF_WIDTH,
+                defaults.leftMargin(),
+                defaults.rightMargin(),
+                defaults.topMargin(),
+                defaults.measureMinWidth(),
+                defaults.fontSize());
+    }
+
+    private static String stripExtension(String fileName) {
+        int dot = fileName.lastIndexOf('.');
+        return dot >= 0 ? fileName.substring(0, dot) : fileName;
+    }
+
+    /**
+     * Launches the JavaFX demo application.
+     *
+     * @param args command-line arguments passed to JavaFX
+     */
+    public static void main(String[] args) {
+        launch(args);
+    }
+
     @Override
     public void start(Stage stage) {
         this.stage = stage;
@@ -104,7 +126,7 @@ public final class SheetDemoApp extends Application {
         }
 
         Scene scene = new Scene(root, 1400, 800);
-        stage.setTitle("Sheet4j Demo");
+        stage.setTitle("Sheetmusic4J Demo");
         stage.setScene(scene);
         stage.show();
     }
@@ -250,7 +272,7 @@ public final class SheetDemoApp extends Application {
         toolbar.setPadding(new Insets(4));
 
         BorderPane pane = new BorderPane(diffWebView);
-        pane.setTop(new javafx.scene.layout.VBox(sectionTitle("Diff (Sheet4j vs sibling PDF)"), toolbar));
+        pane.setTop(new javafx.scene.layout.VBox(sectionTitle("Diff (Sheetmusic4J vs sibling PDF)"), toolbar));
         return pane;
     }
 
@@ -262,7 +284,7 @@ public final class SheetDemoApp extends Application {
     }
 
     private HBox buildScoreToolbar() {
-        Label title = sectionTitle("Sheet4j rendering");
+        Label title = sectionTitle("Sheetmusic4J rendering");
         Button zoomOut = new Button("-");
         zoomOut.setOnAction(e -> adjustZoom(1.0 / ZOOM_STEP));
         Button zoomIn = new Button("+");
@@ -302,7 +324,7 @@ public final class SheetDemoApp extends Application {
             Optional<Path> pdf = PdfSibling.existingPathFor(path);
             showPdf(pdf);
             updateDebug(score, pdf);
-            stage.setTitle("Sheet4j Demo - " + path.getFileName());
+            stage.setTitle("Sheetmusic4J Demo - " + path.getFileName());
             generateReferenceButton.setDisable(pdf.isEmpty());
             diffStatus.setText(pdf.isPresent()
                     ? "Click 'Compare against PDF' to render the diff report."
@@ -387,12 +409,12 @@ public final class SheetDemoApp extends Application {
     }
 
     /**
-     * Viewport-driven width used by the top "Sheet4j rendering" pane. The
+     * Viewport-driven width used by the top "Sheetmusic4J rendering" pane. The
      * diff comparison keeps the fixed {@link #DIFF_WIDTH} so per-fixture
      * similarity numbers stay comparable across runs.
      *
      * @return the current effective system width in pixels, or
-     *         {@code DIFF_WIDTH} when the viewport has not resolved yet
+     * {@code DIFF_WIDTH} when the viewport has not resolved yet
      */
     private double currentViewportWidth() {
         return lastViewportWidth > 0 ? lastViewportWidth : DIFF_WIDTH;
@@ -436,7 +458,7 @@ public final class SheetDemoApp extends Application {
                 DiagnosticComparator.Diagnostic diagnostic =
                         new DiagnosticComparator().compare(rendered, reference, layout);
 
-                Path outDir = Path.of(System.getProperty("java.io.tmpdir"), "sheet4j-diff",
+                Path outDir = Path.of(System.getProperty("java.io.tmpdir"), "sheetmusic4j-diff",
                         stripExtension(fileName));
                 return DiffReportWriter.write(outDir, stripExtension(fileName),
                         rendered, reference, count.getAsInt(), layout.systems().size(), diagnostic);
@@ -453,25 +475,7 @@ public final class SheetDemoApp extends Application {
             diffStatus.setText("Failed: " + (t != null ? t.getMessage() : "unknown"));
             generateReferenceButton.setDisable(false);
         });
-        new Thread(task, "sheet4j-diff-generator").start();
-    }
-
-    private static LayoutOptions layoutOptions() {
-        LayoutOptions defaults = LayoutOptions.defaults();
-        return new LayoutOptions(
-                defaults.staffLineGap(),
-                defaults.staffSpacing(),
-                DIFF_WIDTH,
-                defaults.leftMargin(),
-                defaults.rightMargin(),
-                defaults.topMargin(),
-                defaults.measureMinWidth(),
-                defaults.fontSize());
-    }
-
-    private static String stripExtension(String fileName) {
-        int dot = fileName.lastIndexOf('.');
-        return dot >= 0 ? fileName.substring(0, dot) : fileName;
+        new Thread(task, "sheetmusic4j-diff-generator").start();
     }
 
     private void reload() {
@@ -488,31 +492,30 @@ public final class SheetDemoApp extends Application {
         sheetView.setScore(null);
         removePdf();
         updateDebug(null, Optional.empty());
-        stage.setTitle("Sheet4j Demo");
+        stage.setTitle("Sheetmusic4J Demo");
         statusLabel.setText("Closed.");
         generateReferenceButton.setDisable(true);
     }
 
     private void updateDebug(Score score, Optional<Path> pdf) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("File: ").append(currentFile != null ? currentFile.toAbsolutePath() : "(none)").append('\n');
-        sb.append("PDF : ").append(pdf.map(p -> p.toAbsolutePath().toString()).orElse("(none)")).append('\n');
-        sb.append("System width (viewport): ")
-                .append(String.format(java.util.Locale.ROOT, "%.0f", currentViewportWidth()))
-                .append('\n');
-        sb.append("Zoom: ")
-                .append(String.format(java.util.Locale.ROOT, "%.0f%%", sheetView.getZoom() * 100.0))
-                .append("\n\n");
-        sb.append(ScoreInspector.describe(score));
-        debugArea.setText(sb.toString());
+        String sb = "File: " + (currentFile != null ? currentFile.toAbsolutePath() : "(none)") + '\n' +
+                "PDF : " + pdf.map(p -> p.toAbsolutePath().toString()).orElse("(none)") + '\n' +
+                "System width (viewport): " +
+                String.format(java.util.Locale.ROOT, "%.0f", currentViewportWidth()) +
+                '\n' +
+                "Zoom: " +
+                String.format(java.util.Locale.ROOT, "%.0f%%", sheetView.getZoom() * 100.0) +
+                "\n\n" +
+                ScoreInspector.describe(score);
+        debugArea.setText(sb);
     }
 
     private void showAbout() {
         Alert alert = new Alert(Alert.AlertType.INFORMATION);
-        alert.setTitle("About Sheet4j Demo");
-        alert.setHeaderText("Sheet4j Demo");
+        alert.setTitle("About Sheetmusic4J Demo");
+        alert.setHeaderText("Sheetmusic4J Demo");
         alert.setContentText("""
-                A JavaFX testbed for the Sheet4j sheet-music rendering library.
+                A JavaFX testbed for the Sheetmusic4J sheet-music rendering library.
                 Open MusicXML or MIDI files to preview how they are engraved.
                 A companion PDF (same file name) is shown side by side when present.
                 Use View -> Show Diff tab to compare against the sibling PDF.""");
@@ -525,14 +528,5 @@ public final class SheetDemoApp extends Application {
         alert.setHeaderText(header);
         alert.setContentText(message);
         alert.showAndWait();
-    }
-
-    /**
-     * Launches the JavaFX demo application.
-     *
-     * @param args command-line arguments passed to JavaFX
-     */
-    public static void main(String[] args) {
-        launch(args);
     }
 }

@@ -354,16 +354,21 @@ public final class ScorePainter {
         double gap = staff.lineGap();
         double bend = gap * 0.6 * (tie.curveUp() ? -1 : 1);
         double midX = (tie.x1() + tie.x2()) / 2.0;
-        double midY = ((tie.y1() + tie.y2()) / 2.0) + bend;
-        surface.strokeLine(tie.x1(), tie.y1(), midX, midY);
-        surface.strokeLine(midX, midY, tie.x2(), tie.y2());
+        double avgY = (tie.y1() + tie.y2()) / 2.0;
+        // A quadratic curve only reaches the midpoint of (control point,
+        // straight-line average) at its own apex - not the control point
+        // itself - so the control point must overshoot the intended visual
+        // peak by 2x for the rendered curve to actually reach it.
+        double controlY = avgY + 2 * bend;
+        surface.strokeQuadCurve(tie.x1(), tie.y1(), midX, controlY, tie.x2(), tie.y2());
     }
 
     /**
-     * Draw a slur as a shallow curve approximated with two lines meeting at
-     * the peak, the same technique {@link #drawTie} uses. Slurs typically
-     * span more horizontal distance than ties, so the bend is proportional
-     * to the span rather than a flat multiple of the staff-line gap.
+     * Draw a slur as a rounded arc (a real quadratic curve, not two straight
+     * segments meeting at a point - that reads as an angular "^"/"V" rather
+     * than a slur). Slurs typically span more horizontal distance than
+     * ties, so the bend is proportional to the span rather than a flat
+     * multiple of the staff-line gap.
      */
     private void drawSlur(RenderSurface surface, StaffLayout staff, SlurPlacement slur) {
         double span = Math.abs(slur.x2() - slur.x1());
@@ -386,8 +391,10 @@ public final class ScorePainter {
             double defaultPeak = avgY + Math.max(gap * 1.3, span * 0.12);
             midY = Math.max(defaultPeak, slur.clearY() + clearance);
         }
-        surface.strokeLine(slur.x1(), slur.y1(), midX, midY);
-        surface.strokeLine(midX, midY, slur.x2(), slur.y2());
+        // Same doubled-control-point trick as drawTie, so the curve's own
+        // apex - not the control point - lands at the computed midY.
+        double controlY = 2 * midY - avgY;
+        surface.strokeQuadCurve(slur.x1(), slur.y1(), midX, controlY, slur.x2(), slur.y2());
     }
 
     /**

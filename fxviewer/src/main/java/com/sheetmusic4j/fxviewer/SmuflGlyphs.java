@@ -3,7 +3,7 @@ package com.sheetmusic4j.fxviewer;
 import com.sheetmusic4j.engraving.glyph.Glyph;
 
 /**
- * Renderer-agnostic mapping from Sheet4j's {@link Glyph} enum to
+ * Renderer-agnostic mapping from Sheetmusic4J's {@link Glyph} enum to
  * <a href="https://www.smufl.org/">SMuFL</a> codepoints (as displayed by
  * <a href="https://github.com/steinbergmedia/bravura">Bravura</a>).
  *
@@ -36,6 +36,21 @@ import com.sheetmusic4j.engraving.glyph.Glyph;
  */
 public final class SmuflGlyphs {
 
+    /**
+     * Classpath location where the Bravura OTF is expected. When the file is
+     * present, {@link RenderSurface#drawSmuflGlyph(String, double, double, double)}
+     * implementations register it and switch to SMuFL codepoint rendering.
+     * When absent, {@link ScorePainter} silently falls back to primitive
+     * shapes.
+     */
+    public static final String BRAVURA_RESOURCE = "/fonts/Bravura.otf";
+    /**
+     * Nominal font-family name for the loaded Bravura font. Matches the value
+     * exposed by both {@link javafx.scene.text.Font#getFamily()} and
+     * {@link java.awt.Font#getFamily()} after registration.
+     */
+    public static final String BRAVURA_FAMILY = "Bravura";
+
     private SmuflGlyphs() {
     }
 
@@ -46,7 +61,7 @@ public final class SmuflGlyphs {
      *
      * @param glyph glyph to map
      * @return SMuFL codepoint string, or {@code null} if the glyph is not
-     *         backed by a SMuFL character
+     * backed by a SMuFL character
      */
     public static String codepoint(Glyph glyph) {
         return switch (glyph) {
@@ -105,8 +120,8 @@ public final class SmuflGlyphs {
             case ARTICULATION_ACCENT -> "\uE4A0";
             case ARTICULATION_STACCATO -> "\uE4A2";
             default -> null;
-            };
-            }
+        };
+    }
 
     /**
      * Half of the SMuFL advance width for the given glyph, expressed in
@@ -126,7 +141,7 @@ public final class SmuflGlyphs {
             case NOTEHEAD_BLACK, NOTEHEAD_HALF -> 1.18;
             case NOTEHEAD_WHOLE -> 1.5;
             case TIME_DIGIT_0, TIME_DIGIT_1, TIME_DIGIT_2, TIME_DIGIT_3, TIME_DIGIT_4,
-                    TIME_DIGIT_5, TIME_DIGIT_6, TIME_DIGIT_7, TIME_DIGIT_8, TIME_DIGIT_9 -> 1.4;
+                 TIME_DIGIT_5, TIME_DIGIT_6, TIME_DIGIT_7, TIME_DIGIT_8, TIME_DIGIT_9 -> 1.4;
             case ACCIDENTAL_FLAT -> 0.9;
             case ACCIDENTAL_NATURAL -> 0.65;
             case ACCIDENTAL_SHARP -> 1.0;
@@ -135,31 +150,15 @@ public final class SmuflGlyphs {
             case AUG_DOT -> 0.4;
             case DYNAMIC_P, DYNAMIC_F, DYNAMIC_NIENTE -> 1.5;
             case DYNAMIC_PP, DYNAMIC_MP, DYNAMIC_MF, DYNAMIC_FF, DYNAMIC_FZ,
-                    DYNAMIC_FP, DYNAMIC_SF, DYNAMIC_RF -> 2.4;
+                 DYNAMIC_FP, DYNAMIC_SF, DYNAMIC_RF -> 2.4;
             case DYNAMIC_PPP, DYNAMIC_FFF, DYNAMIC_SFZ, DYNAMIC_RFZ -> 3.2;
             case BRACE -> 0.6;
             case BRACKET_TOP, BRACKET_BOTTOM -> 0.7;
             case ARTICULATION_STACCATO -> 0.5;
             case ARTICULATION_ACCENT -> 1.2;
             default -> 0.0;
-            };
+        };
         // 1 em = 4 staff spaces in SMuFL, so staffSpaces / 4 = fraction of the em/sizeHint.
         return staffSpaces * 0.5 * sizeHint / 4.0;
     }
-
-    /**
-     * Classpath location where the Bravura OTF is expected. When the file is
-     * present, {@link RenderSurface#drawSmuflGlyph(String, double, double, double)}
-     * implementations register it and switch to SMuFL codepoint rendering.
-     * When absent, {@link ScorePainter} silently falls back to primitive
-     * shapes.
-     */
-    public static final String BRAVURA_RESOURCE = "/fonts/Bravura.otf";
-
-    /**
-     * Nominal font-family name for the loaded Bravura font. Matches the value
-     * exposed by both {@link javafx.scene.text.Font#getFamily()} and
-     * {@link java.awt.Font#getFamily()} after registration.
-     */
-    public static final String BRAVURA_FAMILY = "Bravura";
 }

@@ -1,18 +1,18 @@
 package com.sheetmusic4j.fxdemo.reference;
 
-import java.awt.Rectangle;
+import com.sheetmusic4j.engraving.layout.LayoutResult;
+import com.sheetmusic4j.engraving.layout.MeasureLayout;
+import com.sheetmusic4j.engraving.layout.StaffLayout;
+import com.sheetmusic4j.engraving.placement.GlyphPlacement;
+import com.sheetmusic4j.fxdemo.ImageSimilarity;
+
+import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
 
-import com.sheetmusic4j.engraving.placement.GlyphPlacement;
-import com.sheetmusic4j.engraving.layout.LayoutResult;
-import com.sheetmusic4j.engraving.layout.MeasureLayout;
-import com.sheetmusic4j.engraving.layout.StaffLayout;
-import com.sheetmusic4j.fxdemo.ImageSimilarity;
-
 /**
- * Performs a step-by-step comparison of a Sheet4j engraving against a reference
+ * Performs a step-by-step comparison of a Sheetmusic4J engraving against a reference
  * image (typically the vertically-stitched pages of the sibling PDF, rasterized
  * via {@link PdfRasterizer}).
  *
@@ -33,129 +33,6 @@ public final class DiagnosticComparator {
      * ink in the reference image.
      */
     private static final int GLYPH_WINDOW = 12;
-
-    /**
-     * A per-measure similarity entry.
-     *
-     * @param staffIndex    zero-based staff index
-     * @param measureIndex  zero-based measure index within the staff
-     * @param measureNumber score measure number
-     * @param renderedRect  clipped measure bounds in the rendered image
-     * @param referenceRect mapped measure bounds in the reference image
-     * @param similarity    similarity ratio for the measure window
-     */
-    public record MeasureDiff(int staffIndex, int measureIndex, int measureNumber,
-                              Rectangle renderedRect, Rectangle referenceRect,
-                              double similarity) {
-    }
-
-    /**
-     * A per-glyph presence entry.
-     *
-     * @param staffIndex          zero-based staff index
-     * @param glyphIndex          zero-based glyph index within the staff
-     * @param placement           engraved glyph placement
-     * @param presentInReference  whether reference ink was detected near the glyph anchor
-     * @param localInk            measured reference ink ratio in the sample window
-     */
-    public record GlyphPresence(int staffIndex, int glyphIndex, GlyphPlacement placement,
-                                boolean presentInReference, double localInk) {
-    }
-
-    /**
-     * Aggregated diagnostic result.
-     *
-     * @param overallSimilarity overall image similarity ratio
-     * @param renderedInkRatio  ink ratio in the Sheet4j rendering
-     * @param referenceInkRatio ink ratio in the reference image
-     * @param renderedStaves    detected or inferred staff boxes in the rendering
-     * @param referenceStaves   detected or inferred staff boxes in the reference image
-     * @param measures          per-measure similarity entries
-     * @param glyphs            per-glyph presence entries
-     */
-    public record Diagnostic(
-            double overallSimilarity,
-            double renderedInkRatio,
-            double referenceInkRatio,
-            List<Rectangle> renderedStaves,
-            List<Rectangle> referenceStaves,
-            List<MeasureDiff> measures,
-            List<GlyphPresence> glyphs) {
-
-        /**
-         * Creates an immutable diagnostic snapshot with defensive copies of its
-         * collection components.
-         */
-        public Diagnostic {
-            renderedStaves = List.copyOf(renderedStaves);
-            referenceStaves = List.copyOf(referenceStaves);
-            measures = List.copyOf(measures);
-            glyphs = List.copyOf(glyphs);
-        }
-
-        /**
-         * Returns the worst-performing measures for logging in failure messages.
-         *
-         * @param limit maximum number of measure entries to return
-         * @return the lowest-similarity measures, ordered from worst to best
-         */
-        public List<MeasureDiff> worstMeasures(int limit) {
-            return measures.stream()
-                    .sorted((a, b) -> Double.compare(a.similarity(), b.similarity()))
-                    .limit(limit)
-                    .toList();
-        }
-    }
-
-    /**
-     * Compare a rendered score image with its reference image using the supplied
-     * layout metadata.
-     *
-     * @param rendered  Sheet4j-rendered score image
-     * @param reference reference image to compare against
-     * @param layout    layout result corresponding to the rendered image
-     * @return localized diagnostic data for the comparison
-     */
-    public Diagnostic compare(BufferedImage rendered, BufferedImage reference, LayoutResult layout) {
-        double overall = ImageSimilarity.similarity(rendered, reference);
-        double renderedInk = ImageSimilarity.inkRatio(rendered);
-        double referenceInk = ImageSimilarity.inkRatio(reference);
-
-        List<Rectangle> renderedStaves = detectRenderedStaves(layout, rendered.getWidth(), rendered.getHeight());
-        List<Rectangle> referenceStaves = StaffDetector.detect(reference);
-
-        List<MeasureDiff> measureDiffs = new ArrayList<>();
-        List<GlyphPresence> glyphPresences = new ArrayList<>();
-
-        List<StaffLayout> staves = layout.staves();
-        for (int si = 0; si < staves.size(); si++) {
-            StaffLayout staff = staves.get(si);
-            Rectangle renderedStaffBox = staffBox(staff, rendered.getWidth(), rendered.getHeight());
-            Rectangle referenceStaffBox = si < referenceStaves.size()
-                    ? referenceStaves.get(si)
-                    : fallbackReferenceBox(reference, si, staves.size());
-
-            for (int mi = 0; mi < staff.measures().size(); mi++) {
-                MeasureLayout measure = staff.measures().get(mi);
-                Rectangle renderedRect = clip(new Rectangle(
-                        (int) Math.round(measure.x()), renderedStaffBox.y,
-                        (int) Math.round(measure.width()), renderedStaffBox.height), rendered);
-                Rectangle referenceRect = mapRectangle(renderedRect, renderedStaffBox, referenceStaffBox, reference);
-                double sim = cropSimilarity(rendered, renderedRect, reference, referenceRect);
-                measureDiffs.add(new MeasureDiff(si, mi, measure.number(), renderedRect, referenceRect, sim));
-            }
-
-            for (int gi = 0; gi < staff.glyphs().size(); gi++) {
-                GlyphPlacement placement = staff.glyphs().get(gi);
-                Rectangle window = mapPointToWindow(placement, renderedStaffBox, referenceStaffBox, reference);
-                double localInk = ImageSimilarity.inkRatio(cropSafely(reference, window));
-                glyphPresences.add(new GlyphPresence(si, gi, placement, localInk > 0.02, localInk));
-            }
-        }
-
-        return new Diagnostic(overall, renderedInk, referenceInk,
-                renderedStaves, referenceStaves, measureDiffs, glyphPresences);
-    }
 
     private static List<Rectangle> detectRenderedStaves(LayoutResult layout, int width, int height) {
         List<Rectangle> boxes = new ArrayList<>();
@@ -238,5 +115,128 @@ public final class DiagnosticComparator {
         int right = Math.max(x, Math.min(r.x + r.width, width));
         int bottom = Math.max(y, Math.min(r.y + r.height, height));
         return new Rectangle(x, y, right - x, bottom - y);
+    }
+
+    /**
+     * Compare a rendered score image with its reference image using the supplied
+     * layout metadata.
+     *
+     * @param rendered  Sheetmusic4J-rendered score image
+     * @param reference reference image to compare against
+     * @param layout    layout result corresponding to the rendered image
+     * @return localized diagnostic data for the comparison
+     */
+    public Diagnostic compare(BufferedImage rendered, BufferedImage reference, LayoutResult layout) {
+        double overall = ImageSimilarity.similarity(rendered, reference);
+        double renderedInk = ImageSimilarity.inkRatio(rendered);
+        double referenceInk = ImageSimilarity.inkRatio(reference);
+
+        List<Rectangle> renderedStaves = detectRenderedStaves(layout, rendered.getWidth(), rendered.getHeight());
+        List<Rectangle> referenceStaves = StaffDetector.detect(reference);
+
+        List<MeasureDiff> measureDiffs = new ArrayList<>();
+        List<GlyphPresence> glyphPresences = new ArrayList<>();
+
+        List<StaffLayout> staves = layout.staves();
+        for (int si = 0; si < staves.size(); si++) {
+            StaffLayout staff = staves.get(si);
+            Rectangle renderedStaffBox = staffBox(staff, rendered.getWidth(), rendered.getHeight());
+            Rectangle referenceStaffBox = si < referenceStaves.size()
+                    ? referenceStaves.get(si)
+                    : fallbackReferenceBox(reference, si, staves.size());
+
+            for (int mi = 0; mi < staff.measures().size(); mi++) {
+                MeasureLayout measure = staff.measures().get(mi);
+                Rectangle renderedRect = clip(new Rectangle(
+                        (int) Math.round(measure.x()), renderedStaffBox.y,
+                        (int) Math.round(measure.width()), renderedStaffBox.height), rendered);
+                Rectangle referenceRect = mapRectangle(renderedRect, renderedStaffBox, referenceStaffBox, reference);
+                double sim = cropSimilarity(rendered, renderedRect, reference, referenceRect);
+                measureDiffs.add(new MeasureDiff(si, mi, measure.number(), renderedRect, referenceRect, sim));
+            }
+
+            for (int gi = 0; gi < staff.glyphs().size(); gi++) {
+                GlyphPlacement placement = staff.glyphs().get(gi);
+                Rectangle window = mapPointToWindow(placement, renderedStaffBox, referenceStaffBox, reference);
+                double localInk = ImageSimilarity.inkRatio(cropSafely(reference, window));
+                glyphPresences.add(new GlyphPresence(si, gi, placement, localInk > 0.02, localInk));
+            }
+        }
+
+        return new Diagnostic(overall, renderedInk, referenceInk,
+                renderedStaves, referenceStaves, measureDiffs, glyphPresences);
+    }
+
+    /**
+     * A per-measure similarity entry.
+     *
+     * @param staffIndex    zero-based staff index
+     * @param measureIndex  zero-based measure index within the staff
+     * @param measureNumber score measure number
+     * @param renderedRect  clipped measure bounds in the rendered image
+     * @param referenceRect mapped measure bounds in the reference image
+     * @param similarity    similarity ratio for the measure window
+     */
+    public record MeasureDiff(int staffIndex, int measureIndex, int measureNumber,
+                              Rectangle renderedRect, Rectangle referenceRect,
+                              double similarity) {
+    }
+
+    /**
+     * A per-glyph presence entry.
+     *
+     * @param staffIndex         zero-based staff index
+     * @param glyphIndex         zero-based glyph index within the staff
+     * @param placement          engraved glyph placement
+     * @param presentInReference whether reference ink was detected near the glyph anchor
+     * @param localInk           measured reference ink ratio in the sample window
+     */
+    public record GlyphPresence(int staffIndex, int glyphIndex, GlyphPlacement placement,
+                                boolean presentInReference, double localInk) {
+    }
+
+    /**
+     * Aggregated diagnostic result.
+     *
+     * @param overallSimilarity overall image similarity ratio
+     * @param renderedInkRatio  ink ratio in the Sheetmusic4J rendering
+     * @param referenceInkRatio ink ratio in the reference image
+     * @param renderedStaves    detected or inferred staff boxes in the rendering
+     * @param referenceStaves   detected or inferred staff boxes in the reference image
+     * @param measures          per-measure similarity entries
+     * @param glyphs            per-glyph presence entries
+     */
+    public record Diagnostic(
+            double overallSimilarity,
+            double renderedInkRatio,
+            double referenceInkRatio,
+            List<Rectangle> renderedStaves,
+            List<Rectangle> referenceStaves,
+            List<MeasureDiff> measures,
+            List<GlyphPresence> glyphs) {
+
+        /**
+         * Creates an immutable diagnostic snapshot with defensive copies of its
+         * collection components.
+         */
+        public Diagnostic {
+            renderedStaves = List.copyOf(renderedStaves);
+            referenceStaves = List.copyOf(referenceStaves);
+            measures = List.copyOf(measures);
+            glyphs = List.copyOf(glyphs);
+        }
+
+        /**
+         * Returns the worst-performing measures for logging in failure messages.
+         *
+         * @param limit maximum number of measure entries to return
+         * @return the lowest-similarity measures, ordered from worst to best
+         */
+        public List<MeasureDiff> worstMeasures(int limit) {
+            return measures.stream()
+                    .sorted((a, b) -> Double.compare(a.similarity(), b.similarity()))
+                    .limit(limit)
+                    .toList();
+        }
     }
 }

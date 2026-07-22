@@ -4,35 +4,63 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Sheetmusic4J is a Java 21 / JavaFX library for parsing, rendering, and interacting with sheet music (MusicXML + MIDI). It follows the same layering approach as the author's `lottie4j` project: a clean, framework-agnostic domain model at the bottom, a pure layout/math layer in the middle, and JavaFX rendering only at the edge.
+Sheetmusic4J is a Java 21 / JavaFX library for parsing, rendering, and interacting with sheet music (MusicXML + MIDI).
+It follows the same layering approach as the author's `lottie4j` project: a clean, framework-agnostic domain model at
+the bottom, a pure layout/math layer in the middle, and JavaFX rendering only at the edge.
 
 GroupId `com.sheetmusic4j`, parent artifactId `sheetmusic4j-parent`.
 
 ## Inspired by
 
 * https://www.musicxml.com/: The standard open format for exchanging digital sheet music
-* https://github.com/opensheetmusicdisplay/opensheetmusicdisplay: OpenSheetMusicDisplay renders sheet music in MusicXML format in browsers and headless with NodeJS.
+* https://github.com/opensheetmusicdisplay/opensheetmusicdisplay: OpenSheetMusicDisplay renders sheet music in MusicXML
+  format in browsers and headless with NodeJS.
 
 ## Modules (build order, each depends only on the ones before it)
 
-1. **`core`** — domain model (`Score`, `Part`, `Measure`, `Attributes`, `Note`, `Chord`, `Rest`, `Pitch`, `Clef`, `KeySignature`, `TimeSignature`, etc.) plus MusicXML read/write (`com.sheetmusic4j.core.musicxml`, StAX-based, XXE-hardened) and MIDI import/export (`com.sheetmusic4j.core.midi`, `javax.sound.midi`). `com.sheetmusic4j.core.io.ScoreFile` is the load/save facade that dispatches by file extension (`.musicxml`/`.xml`/`.mxl` → MusicXML, `.mid`/`.midi` → MIDI). **No JavaFX dependency.**
-2. **`engraving`** — pure layout engine. `Engraver.layout(Score, LayoutOptions)` walks parts/measures and produces a `LayoutResult` (`SystemLayout` → `StaffLayout` → `MeasureLayout`/`GlyphPlacement`) as plain doubles + a renderer-agnostic `Glyph` enum. No JavaFX, no I/O — this is what makes layout unit-testable headlessly. Vertical note position is computed by `Engraver.staffStep(Pitch, Clef)`.
-3. **`fxviewer`** — rendering. The drawing logic lives in `ScorePainter`, which draws a `LayoutResult` through the `RenderSurface` interface (stroke/fill/oval/text primitives) rather than directly against JavaFX. `FxRenderSurface` implements `RenderSurface` for a JavaFX `GraphicsContext`; `SheetView` is the `Region`/`Canvas` control that ties `Engraver` + `ScorePainter` + `FxRenderSurface` together for on-screen display.
-4. **`fxdemo`** — standalone JavaFX demo app (`SheetDemoApp`, launched via `DemoLauncher` to avoid classpath JavaFX-runtime errors). Lets you open a MusicXML/MIDI file, shows a debug pane (`ScoreInspector`), and shows a companion PDF side-by-side via `com.dlsc.pdfviewfx:pdfviewfx` when one exists next to the loaded file (same basename, `.pdf`; resolved by `PdfSibling`).
+1. **`core`** — domain model (`Score`, `Part`, `Measure`, `Attributes`, `Note`, `Chord`, `Rest`, `Pitch`, `Clef`,
+   `KeySignature`, `TimeSignature`, etc.) plus MusicXML read/write (`com.sheetmusic4j.core.musicxml`, StAX-based,
+   XXE-hardened) and MIDI import/export (`com.sheetmusic4j.core.midi`, `javax.sound.midi`).
+   `com.sheetmusic4j.core.io.ScoreFile` is the load/save facade that dispatches by file extension (`.musicxml`/`.xml`/
+   `.mxl` → MusicXML, `.mid`/`.midi` → MIDI). **No JavaFX dependency.**
+2. **`engraving`** — pure layout engine. `Engraver.layout(Score, LayoutOptions)` walks parts/measures and produces a
+   `LayoutResult` (`SystemLayout` → `StaffLayout` → `MeasureLayout`/`GlyphPlacement`) as plain doubles + a
+   renderer-agnostic `Glyph` enum. No JavaFX, no I/O — this is what makes layout unit-testable headlessly. Vertical note
+   position is computed by `Engraver.staffStep(Pitch, Clef)`.
+3. **`fxviewer`** — rendering. The drawing logic lives in `ScorePainter`, which draws a `LayoutResult` through the
+   `RenderSurface` interface (stroke/fill/oval/text primitives) rather than directly against JavaFX. `FxRenderSurface`
+   implements `RenderSurface` for a JavaFX `GraphicsContext`; `SheetView` is the `Region`/`Canvas` control that ties
+   `Engraver` + `ScorePainter` + `FxRenderSurface` together for on-screen display.
+4. **`fxdemo`** — standalone JavaFX demo app (`SheetDemoApp`, launched via `DemoLauncher` to avoid classpath
+   JavaFX-runtime errors). Lets you open a MusicXML/MIDI file, shows a debug pane (`ScoreInspector`), and shows a
+   companion PDF side-by-side via `com.dlsc.pdfviewfx:pdfviewfx` when one exists next to the loaded file (same basename,
+   `.pdf`; resolved by `PdfSibling`).
 
-**Key architectural rule**: the same `ScorePainter` logic is reused for both on-screen JavaFX rendering (`FxRenderSurface`) and headless AWT rendering in tests (`AwtRenderSurface` in `fxdemo`'s test sources), by depending only on the `RenderSurface` abstraction. Never draw directly against `GraphicsContext` or `Graphics2D` outside of a `RenderSurface` implementation — new drawing logic belongs in `ScorePainter`.
+**Key architectural rule**: the same `ScorePainter` logic is reused for both on-screen JavaFX rendering
+(`FxRenderSurface`) and headless AWT rendering in tests (`AwtRenderSurface` in `fxdemo`'s test sources), by depending
+only on the `RenderSurface` abstraction. Never draw directly against `GraphicsContext` or `Graphics2D` outside of a
+`RenderSurface` implementation — new drawing logic belongs in `ScorePainter`.
 
 ## Visual regression testing
 
-`fxdemo`'s `CompareFxViewWithReferenceTest` renders every fixture headlessly (`HeadlessScoreImage`, using the production `Engraver` + `ScorePainter` + `AwtRenderSurface`) and compares it against the sibling PDF committed next to the MusicXML fixture:
-- The sibling PDF is rasterized page-by-page via `PdfRasterizer` (PDFBox, invoked reflectively so the reference stays on the classpath transitively via `pdfviewfx`).
-- Pages are stitched vertically via `ImageStack.stackVertically(...)` into a single tall reference image, which `DiagnosticComparator` consumes unchanged.
-- Assertions are layered: PDF page count (metadata) → ink sanity → staff count → staff bounding-box ratios → per-measure similarity.
-- Fixtures without a sibling PDF are skipped via `Assumptions.assumeTrue`.
-- Rasterization DPI is tunable via `-Dsheetmusic4j.compare.pdf.dpi=<float>` (default `150`); per-measure similarity threshold via `-Dsheetmusic4j.compare.measure.threshold=<0..1>` (default `0.4`).
-- On failure a self-contained HTML report is written to `fxdemo/target/sheet4j-diff/<fixture>/report.html`.
+`fxdemo`'s `CompareFxViewWithReferenceTest` renders every fixture headlessly (`HeadlessScoreImage`, using the production
+`Engraver` + `ScorePainter` + `AwtRenderSurface`) and compares it against the sibling PDF committed next to the MusicXML
+fixture:
 
-`fxdemo/src/test/resources/xmlsamples/` contains real-world MusicXML/MXL sample scores (with matching reference PDFs/PNGs for several) sourced from https://www.musicxml.com/music-in-musicxml/example-set/ — useful for exercising the reader/engraver against non-trivial scores beyond the minimal `c-major-scale.musicxml` fixture.
+- The sibling PDF is rasterized page-by-page via `PdfRasterizer` (PDFBox, invoked reflectively so the reference stays on
+  the classpath transitively via `pdfviewfx`).
+- Pages are stitched vertically via `ImageStack.stackVertically(...)` into a single tall reference image, which
+  `DiagnosticComparator` consumes unchanged.
+- Assertions are layered: PDF page count (metadata) → ink sanity → staff count → staff bounding-box ratios → per-measure
+  similarity.
+- Fixtures without a sibling PDF are skipped via `Assumptions.assumeTrue`.
+- Rasterization DPI is tunable via `-Dsheetmusic4j.compare.pdf.dpi=<float>` (default `150`); per-measure similarity
+  threshold via `-Dsheetmusic4j.compare.measure.threshold=<0..1>` (default `0.4`).
+- On failure a self-contained HTML report is written to `fxdemo/target/sheetmusic4j-diff/<fixture>/report.html`.
+
+`fxdemo/src/test/resources/xmlsamples/` contains real-world MusicXML/MXL sample scores (with matching reference
+PDFs/PNGs for several) sourced from https://www.musicxml.com/music-in-musicxml/example-set/ — useful for exercising the
+reader/engraver against non-trivial scores beyond the minimal `c-major-scale.musicxml` fixture.
 
 ## Build & test
 
@@ -46,11 +74,17 @@ mvn -pl core -Dtest=MusicXmlReaderTest test   # run a single test class
 mvn -pl fxdemo javafx:run               # launch the JavaFX demo app
 ```
 
-CI (`.github/workflows/ci.yml`) runs `mvn verify` on JDK 26 (Temurin). The library still targets `maven.compiler.release=21`.
+CI (`.github/workflows/ci.yml`) runs `mvn verify` on JDK 26 (Temurin). The library still targets
+`maven.compiler.release=21`.
 
-Release is a manual `workflow_dispatch` (`.github/workflows/release.yml`) that bumps the version with `versions:set` and runs `mvn -Prelease clean deploy` to Maven Central.
+Release is a manual `workflow_dispatch` (`.github/workflows/release.yml`) that bumps the version with `versions:set` and
+runs `mvn -Prelease clean deploy` to Maven Central.
 
 ## Conventions
 
-- Value types in `core.model` are Java records (`Pitch`, `Clef`, `KeySignature`, `TimeSignature`, `Duration`); container types (`Score`, `Part`, `Measure`, `Attributes`) use builders. `MusicElement` is a sealed interface (`Note`, `Rest`, `Chord`).
-- `engraving` and `core` must stay JavaFX-free — this is what keeps layout and model logic unit-testable without a display and reusable outside JavaFX. When adding rendering features, add the drawing primitive to `RenderSurface` first, then implement it in both `FxRenderSurface` and `AwtRenderSurface`, and use it from `ScorePainter`.
+- Value types in `core.model` are Java records (`Pitch`, `Clef`, `KeySignature`, `TimeSignature`, `Duration`); container
+  types (`Score`, `Part`, `Measure`, `Attributes`) use builders. `MusicElement` is a sealed interface (`Note`, `Rest`,
+  `Chord`).
+- `engraving` and `core` must stay JavaFX-free — this is what keeps layout and model logic unit-testable without a
+  display and reusable outside JavaFX. When adding rendering features, add the drawing primitive to `RenderSurface`
+  first, then implement it in both `FxRenderSurface` and `AwtRenderSurface`, and use it from `ScorePainter`.

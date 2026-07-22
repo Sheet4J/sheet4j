@@ -88,6 +88,12 @@ public final class AwtRenderSurface implements RenderSurface {
     }
 
     @Override
+    public void strokeQuadCurve(double x1, double y1, double cx, double cy, double x2, double y2) {
+        g.setColor(stroke);
+        g.draw(new java.awt.geom.QuadCurve2D.Double(x1, y1, cx, cy, x2, y2));
+    }
+
+    @Override
     public void strokeText(String text, double x, double y) {
         g.setColor(stroke);
         g.drawString(text, (float) x, (float) y);

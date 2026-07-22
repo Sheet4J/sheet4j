@@ -82,4 +82,27 @@ public interface RenderSurface {
     default boolean drawSmuflGlyph(String glyphChars, double x, double y, double sizeHint) {
         return false;
     }
+
+    /**
+     * Strokes a smooth quadratic curve from ({@code x1},{@code y1}) to
+     * ({@code x2},{@code y2}) bending toward the control point
+     * ({@code cx},{@code cy}) - used for ties and slurs, which should read
+     * as a rounded arc (like a rotated "(" or ")"), not an angular "V"/"^".
+     * The default falls back to two straight segments meeting at the
+     * control point; backends with a native curve primitive (JavaFX/AWT)
+     * override this for a properly rounded arc.
+     *
+     * @param x1 start x
+     * @param y1 start y
+     * @param cx control point x (pulls the curve toward it, but the curve
+     *           does not pass through it - see {@code ScorePainter}'s
+     *           doubled-bend calculation feeding this)
+     * @param cy control point y
+     * @param x2 end x
+     * @param y2 end y
+     */
+    default void strokeQuadCurve(double x1, double y1, double cx, double cy, double x2, double y2) {
+        strokeLine(x1, y1, cx, cy);
+        strokeLine(cx, cy, x2, y2);
+    }
 }

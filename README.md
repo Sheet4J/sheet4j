@@ -1,4 +1,4 @@
-# Sheetmusic4J :: A Java(FX) library for rendering and interacting with sheet music.
+# Sheetmusic4J :: A Java (FX) library for rendering and interacting with sheet music.
 
 [![Build](https://github.com/sheetmusic4j/sheetmusic4j/actions/workflows/maven.yml/badge.svg)](https://github.com/sheetmusic4j/sheetmusic4j/actions/workflows/maven.yml)
 [![Maven Central](https://img.shields.io/maven-central/v/com.sheetmusic4j/sheetmusic4j.svg?label=Maven%20Central)](https://central.sonatype.com/search?q=g:com.sheetmusic4j)
@@ -11,23 +11,30 @@ Sheetmusic4J requires **Java 21** or higher.
 
 ## Modules
 
-| Module | Description | JavaFX dependency |
-|---|---|---|
-| `core` | Core music data model (`Score`, `Part`, `Measure`, `Note`, `Chord`, `Rest`, `Clef`, `KeySignature`, `TimeSignature`) plus MusicXML and MIDI import/export | No |
-| `engraving` | Framework-agnostic layout engine that turns a `Score` into a positioned `LayoutResult` (staves, measures, glyph placements) | No |
-| `fxviewer` | JavaFX Canvas rendering of a `LayoutResult` using a SMuFL-compliant music font | Yes |
-| `fxdemo` | Standalone JavaFX demo application for loading and inspecting scores | Yes |
+| Module      | Description                                                                                                                                               | JavaFX dependency |
+|-------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------|
+| `core`      | Core music data model (`Score`, `Part`, `Measure`, `Note`, `Chord`, `Rest`, `Clef`, `KeySignature`, `TimeSignature`) plus MusicXML and MIDI import/export | No                |
+| `engraving` | Framework-agnostic layout engine that turns a `Score` into a positioned `LayoutResult` (staves, measures, glyph placements)                               | No                |
+| `fxviewer`  | JavaFX Canvas rendering of a `LayoutResult` using a SMuFL-compliant music font                                                                            | Yes               |
+| `fxdemo`    | Standalone JavaFX demo application for loading and inspecting scores                                                                                      | Yes               |
+
+### Sheetmusic Terminology
+
+See [docs/NOTATION_ELEMENTS.md](docs/NOTATION_ELEMENTS.md) for a visual glossary of the notation elements Sheetmusic4J
+renders, so you can point at something in a screenshot and know exactly which class/method is responsible for it.
 
 ### Core
 
 * Loading and saving of MusicXML 4.0 files, see https://www.musicxml.com/for-developers/
 * Importing and exporting MIDI files (`javax.sound.midi`)
-* `ScoreFile` convenience facade that dispatches to the right reader/writer based on file extension (`.musicxml`, `.xml`, `.mxl`, `.mid`, `.midi`)
+* `ScoreFile` convenience facade that dispatches to the right reader/writer based on file extension (`.musicxml`,
+  `.xml`, `.mxl`, `.mid`, `.midi`)
 * Testfiles from https://www.musicxml.com/music-in-musicxml/example-set/
 
 ### Engraving
 
-* Pure layout math (no JavaFX) that positions staves, measures, clefs, and notes from a `Score`, so it can be unit-tested headlessly and reused by any renderer
+* Pure layout math (no JavaFX) that positions staves, measures, clefs, and notes from a `Score`, so it can be
+  unit-tested headlessly and reused by any renderer
 
 ### FX Viewer
 
@@ -37,7 +44,8 @@ Sheetmusic4J requires **Java 21** or higher.
 ### FX Demo
 
 * Opens MusicXML/MIDI files and displays a debug/inspection pane alongside the rendered score
-* Shows a companion PDF side-by-side (via [pdfviewfx](https://github.com/dlsc-software-consulting-gmbh/PDFViewFX)) when one exists next to the loaded file with the same base name
+* Shows a companion PDF side-by-side (via [pdfviewfx](https://github.com/dlsc-software-consulting-gmbh/PDFViewFX)) when
+  one exists next to the loaded file with the same base name
 
 ## Requirements
 
@@ -58,4 +66,5 @@ mvn -pl fxdemo javafx:run
 
 ## Status
 
-Module structure, domain model, MusicXML/MIDI I/O, layout engine, JavaFX rendering, and the demo app are in place; rendering fidelity and MusicXML/MIDI coverage are still being expanded.
+Module structure, domain model, MusicXML/MIDI I/O, layout engine, JavaFX rendering, and the demo app are in place;
+rendering fidelity and MusicXML/MIDI coverage are still being expanded.

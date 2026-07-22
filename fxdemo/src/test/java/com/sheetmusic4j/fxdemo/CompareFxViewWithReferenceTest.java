@@ -1,7 +1,21 @@
 package com.sheetmusic4j.fxdemo;
 
-import java.awt.Color;
-import java.awt.Rectangle;
+import com.sheetmusic4j.core.model.Score;
+import com.sheetmusic4j.core.musicxml.MusicXmlReader;
+import com.sheetmusic4j.engraving.Engraver;
+import com.sheetmusic4j.engraving.layout.LayoutOptions;
+import com.sheetmusic4j.engraving.layout.LayoutResult;
+import com.sheetmusic4j.fxdemo.reference.DiagnosticComparator;
+import com.sheetmusic4j.fxdemo.reference.DiffReportWriter;
+import com.sheetmusic4j.fxdemo.reference.ImageStack;
+import com.sheetmusic4j.fxdemo.reference.PdfRasterizer;
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+
+import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -12,28 +26,10 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.stream.Stream;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
-import org.junit.jupiter.api.Assumptions;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
-
-import com.sheetmusic4j.core.model.Score;
-import com.sheetmusic4j.core.musicxml.MusicXmlReader;
-import com.sheetmusic4j.engraving.Engraver;
-import com.sheetmusic4j.engraving.layout.LayoutOptions;
-import com.sheetmusic4j.engraving.layout.LayoutResult;
-import com.sheetmusic4j.fxdemo.reference.DiagnosticComparator;
-import com.sheetmusic4j.fxdemo.reference.DiffReportWriter;
-import com.sheetmusic4j.fxdemo.reference.ImageStack;
-import com.sheetmusic4j.fxdemo.reference.PdfRasterizer;
+import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Diagnostic comparison of the Sheet4j engraving against the sibling PDF
+ * Diagnostic comparison of the Sheetmusic4J engraving against the sibling PDF
  * committed next to each MusicXML fixture. Every fixture drives:
  * <ol>
  *   <li>A PDF metadata assertion (expected vs actual page count),</li>
@@ -47,7 +43,7 @@ import com.sheetmusic4j.fxdemo.reference.PdfRasterizer;
  * suite stays green in restricted environments.
  *
  * <p>On failure, a self-contained HTML report is written under
- * {@code target/sheet4j-diff/&lt;fixture&gt;/report.html}.
+ * {@code target/sheetmusic4j-diff/&lt;fixture&gt;/report.html}.
  */
 class CompareFxViewWithReferenceTest {
 
@@ -59,7 +55,7 @@ class CompareFxViewWithReferenceTest {
 
     private static final double MIN_INK = 0.001;
     // The reference is a vertically-stitched multi-page, multi-system PDF; a
-    // single Sheet4j staff can be visually 4x-6x shorter than the full PDF
+    // single Sheetmusic4J staff can be visually 4x-6x shorter than the full PDF
     // band the StaffDetector finds. Loosened from the OSMD-era 0.25..4.0.
     private static final double MIN_STAFF_HEIGHT_RATIO = 0.15;
     private static final double MAX_STAFF_HEIGHT_RATIO = 8.0;
@@ -99,7 +95,7 @@ class CompareFxViewWithReferenceTest {
      * committed fixtures still clear it. Callers may override the bar
      * locally via {@code -Dsheetmusic4j.compare.measure.threshold}.
      */
-     private static final double MIN_PER_MEASURE_SIMILARITY =
+    private static final double MIN_PER_MEASURE_SIMILARITY =
             Double.parseDouble(System.getProperty("sheetmusic4j.compare.measure.threshold", "0.05"));
 
     @BeforeAll
@@ -131,47 +127,6 @@ class CompareFxViewWithReferenceTest {
                 Arguments.of("MozaVeilSample", samples.resolve("MozaVeilSample.musicxml"), 1),
                 Arguments.of("SchbAvMaSample", samples.resolve("SchbAvMaSample.musicxml"), 1)
         );
-    }
-
-    @ParameterizedTest(name = "{0}")
-    @MethodSource("fixtures")
-    void engravingMatchesReference(String name, Path xmlPath, int expectedPages) throws Exception {
-        Path pdf = PdfSibling.existingPathFor(xmlPath).orElse(null);
-        Assumptions.assumeTrue(pdf != null,
-                "No sibling PDF for " + xmlPath + " - skipping.");
-
-        OptionalInt actualPageCount = PdfRasterizer.pageCount(pdf);
-        Assumptions.assumeTrue(actualPageCount.isPresent(),
-                "PDFBox unavailable; skipping.");
-        assertEquals(expectedPages, actualPageCount.getAsInt(),
-                "PDF page count mismatch for " + name);
-
-        Optional<List<BufferedImage>> pages = PdfRasterizer.rasterizeAllPages(pdf, PDF_DPI);
-        Assumptions.assumeTrue(pages.isPresent(),
-                "Could not rasterize " + pdf + " - skipping.");
-        BufferedImage referenceImage = ImageStack.stackVertically(
-                pages.get(), 8, Color.WHITE);
-
-        Score score = loadScore(xmlPath);
-        LayoutResult layout = new Engraver().layout(score, layoutOptions());
-        BufferedImage rendered = HeadlessScoreImage.render(score, WIDTH);
-        double ink = ImageSimilarity.inkRatio(rendered);
-        assertTrue(ink > MIN_INK, "rendered score should not be blank, ink ratio was " + ink);
-
-        DiagnosticComparator.Diagnostic diagnostic =
-                new DiagnosticComparator().compare(rendered, referenceImage, layout);
-
-        Path reportDir = Paths.get("target", "sheet4j-diff", name);
-        Path report = DiffReportWriter.write(reportDir, name, rendered, referenceImage,
-                actualPageCount.getAsInt(), layout.systems().size(), diagnostic);
-
-        try {
-            assertStaffCount(diagnostic);
-            assertStaffBoundingBoxes(diagnostic);
-            assertPerMeasureSimilarity(name, diagnostic, report);
-        } catch (AssertionError e) {
-            throw new AssertionError(e.getMessage() + "\n  Diff report: " + report.toAbsolutePath(), e);
-        }
     }
 
     private static void assertStaffCount(DiagnosticComparator.Diagnostic diagnostic) {
@@ -239,6 +194,47 @@ class CompareFxViewWithReferenceTest {
                 defaults.topMargin(),
                 defaults.measureMinWidth(),
                 defaults.fontSize());
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("fixtures")
+    void engravingMatchesReference(String name, Path xmlPath, int expectedPages) throws Exception {
+        Path pdf = PdfSibling.existingPathFor(xmlPath).orElse(null);
+        Assumptions.assumeTrue(pdf != null,
+                "No sibling PDF for " + xmlPath + " - skipping.");
+
+        OptionalInt actualPageCount = PdfRasterizer.pageCount(pdf);
+        Assumptions.assumeTrue(actualPageCount.isPresent(),
+                "PDFBox unavailable; skipping.");
+        assertEquals(expectedPages, actualPageCount.getAsInt(),
+                "PDF page count mismatch for " + name);
+
+        Optional<List<BufferedImage>> pages = PdfRasterizer.rasterizeAllPages(pdf, PDF_DPI);
+        Assumptions.assumeTrue(pages.isPresent(),
+                "Could not rasterize " + pdf + " - skipping.");
+        BufferedImage referenceImage = ImageStack.stackVertically(
+                pages.get(), 8, Color.WHITE);
+
+        Score score = loadScore(xmlPath);
+        LayoutResult layout = new Engraver().layout(score, layoutOptions());
+        BufferedImage rendered = HeadlessScoreImage.render(score, WIDTH);
+        double ink = ImageSimilarity.inkRatio(rendered);
+        assertTrue(ink > MIN_INK, "rendered score should not be blank, ink ratio was " + ink);
+
+        DiagnosticComparator.Diagnostic diagnostic =
+                new DiagnosticComparator().compare(rendered, referenceImage, layout);
+
+        Path reportDir = Paths.get("target", "sheetmusic4j-diff", name);
+        Path report = DiffReportWriter.write(reportDir, name, rendered, referenceImage,
+                actualPageCount.getAsInt(), layout.systems().size(), diagnostic);
+
+        try {
+            assertStaffCount(diagnostic);
+            assertStaffBoundingBoxes(diagnostic);
+            assertPerMeasureSimilarity(name, diagnostic, report);
+        } catch (AssertionError e) {
+            throw new AssertionError(e.getMessage() + "\n  Diff report: " + report.toAbsolutePath(), e);
+        }
     }
 
     private Score loadScore(Path xmlPath) throws Exception {
