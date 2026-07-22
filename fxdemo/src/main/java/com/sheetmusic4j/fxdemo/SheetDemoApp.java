@@ -35,10 +35,12 @@ import javafx.scene.control.Label;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuBar;
 import javafx.scene.control.MenuItem;
+import javafx.scene.control.Separator;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.TextArea;
+import javafx.scene.layout.Priority;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
@@ -57,6 +59,9 @@ import javafx.stage.Stage;
 public final class SheetDemoApp extends Application {
 
     private static final int DIFF_WIDTH = 1000;
+    private static final double ZOOM_MIN = 0.25;
+    private static final double ZOOM_MAX = 4.0;
+    private static final double ZOOM_STEP = 1.25;
 
     private static final float PDF_DPI =
             (float) Double.parseDouble(
@@ -66,6 +71,7 @@ public final class SheetDemoApp extends Application {
     private final PDFView pdfView = new PDFView();
     private final TextArea debugArea = new TextArea();
     private final Label statusLabel = new Label("Ready.");
+    private final Label zoomLabel = new Label();
 
     private final WebView diffWebView = new WebView();
     private final Label diffStatus = new Label("Open a MusicXML file with a sibling PDF and click 'Compare against PDF'.");
@@ -132,6 +138,18 @@ public final class SheetDemoApp extends Application {
         showBrackets.setSelected(true);
         showBrackets.setOnAction(e -> sheetView.setBracketsVisible(showBrackets.isSelected()));
         viewMenu.getItems().add(showBrackets);
+
+        viewMenu.getItems().add(new SeparatorMenuItem());
+        MenuItem zoomIn = new MenuItem("Zoom In");
+        zoomIn.setAccelerator(new KeyCodeCombination(KeyCode.EQUALS, KeyCombination.SHORTCUT_DOWN));
+        zoomIn.setOnAction(e -> adjustZoom(ZOOM_STEP));
+        MenuItem zoomOut = new MenuItem("Zoom Out");
+        zoomOut.setAccelerator(new KeyCodeCombination(KeyCode.MINUS, KeyCombination.SHORTCUT_DOWN));
+        zoomOut.setOnAction(e -> adjustZoom(1.0 / ZOOM_STEP));
+        MenuItem zoomReset = new MenuItem("Actual Size");
+        zoomReset.setAccelerator(new KeyCodeCombination(KeyCode.DIGIT0, KeyCombination.SHORTCUT_DOWN));
+        zoomReset.setOnAction(e -> setZoom(1.0));
+        viewMenu.getItems().addAll(zoomIn, zoomOut, zoomReset);
 
         Menu textMenu = new Menu("Text");
         CheckMenuItem showTitles = new CheckMenuItem("Show titles");
@@ -207,7 +225,7 @@ public final class SheetDemoApp extends Application {
             }
         });
         BorderPane scorePane = new BorderPane(scoreScroll);
-        scorePane.setTop(sectionTitle("Sheet4j rendering"));
+        scorePane.setTop(buildScoreToolbar());
 
         pdfPane = new BorderPane(pdfView);
         pdfPane.setTop(sectionTitle("Reference PDF"));
@@ -241,6 +259,24 @@ public final class SheetDemoApp extends Application {
         label.setPadding(new Insets(4));
         label.setStyle("-fx-font-weight: bold;");
         return label;
+    }
+
+    private HBox buildScoreToolbar() {
+        Label title = sectionTitle("Sheet4j rendering");
+        Button zoomOut = new Button("-");
+        zoomOut.setOnAction(e -> adjustZoom(1.0 / ZOOM_STEP));
+        Button zoomIn = new Button("+");
+        zoomIn.setOnAction(e -> adjustZoom(ZOOM_STEP));
+        Button zoomReset = new Button("100%");
+        zoomReset.setOnAction(e -> setZoom(1.0));
+        zoomLabel.setPadding(new Insets(0, 8, 0, 0));
+        updateZoomLabel();
+
+        HBox spacer = new HBox();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+        HBox bar = new HBox(8, title, spacer, new Separator(), zoomOut, zoomIn, zoomReset, zoomLabel);
+        bar.setPadding(new Insets(4));
+        return bar;
     }
 
     private void chooseAndOpen() {
@@ -328,6 +364,26 @@ public final class SheetDemoApp extends Application {
             }
             split.setDividerPositions(positions);
         }
+    }
+
+    private void adjustZoom(double factor) {
+        setZoom(sheetView.getZoom() * factor);
+    }
+
+    private void setZoom(double value) {
+        double clamped = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, value));
+        sheetView.setZoom(clamped);
+        updateZoomLabel();
+        statusLabel.setText(String.format(java.util.Locale.ROOT,
+                "Zoom: %.0f%%", clamped * 100.0));
+        Optional<Path> pdf = currentFile != null
+                ? PdfSibling.existingPathFor(currentFile)
+                : Optional.empty();
+        updateDebug(currentScore, pdf);
+    }
+
+    private void updateZoomLabel() {
+        zoomLabel.setText(String.format(java.util.Locale.ROOT, "Zoom %.0f%%", sheetView.getZoom() * 100.0));
     }
 
     /**
@@ -443,6 +499,9 @@ public final class SheetDemoApp extends Application {
         sb.append("PDF : ").append(pdf.map(p -> p.toAbsolutePath().toString()).orElse("(none)")).append('\n');
         sb.append("System width (viewport): ")
                 .append(String.format(java.util.Locale.ROOT, "%.0f", currentViewportWidth()))
+                .append('\n');
+        sb.append("Zoom: ")
+                .append(String.format(java.util.Locale.ROOT, "%.0f%%", sheetView.getZoom() * 100.0))
                 .append("\n\n");
         sb.append(ScoreInspector.describe(score));
         debugArea.setText(sb.toString());
