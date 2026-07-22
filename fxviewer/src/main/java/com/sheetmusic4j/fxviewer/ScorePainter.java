@@ -12,6 +12,7 @@ import com.sheetmusic4j.engraving.layout.LayoutResult;
 import com.sheetmusic4j.engraving.glyph.MarkingCategory;
 import com.sheetmusic4j.engraving.layout.MeasureLayout;
 import com.sheetmusic4j.engraving.placement.SlurPlacement;
+import com.sheetmusic4j.engraving.placement.StemPlacement;
 import com.sheetmusic4j.engraving.layout.StaffLayout;
 import com.sheetmusic4j.engraving.layout.SystemBarline;
 import com.sheetmusic4j.engraving.layout.SystemLayout;
@@ -192,6 +193,19 @@ public final class ScorePainter {
         for (HairpinPlacement hairpin : staff.hairpins()) {
             drawHairpin(surface, hairpin);
         }
+        for (StemPlacement stem : staff.stems()) {
+            drawStem(surface, stem);
+        }
+    }
+
+    /**
+     * Draw a note stem as a straight line between its precomputed
+     * endpoints. Unlike a fixed-length primitive, the engraver has already
+     * lengthened this as needed to reach a shared beam or clear the staff,
+     * so no further adjustment happens here.
+     */
+    private void drawStem(RenderSurface surface, StemPlacement stem) {
+        surface.strokeLine(stem.x(), stem.y1(), stem.x(), stem.y2());
     }
 
     private void drawGlyph(RenderSurface surface, StaffLayout staff, GlyphPlacement glyph) {
@@ -349,13 +363,24 @@ public final class ScorePainter {
     private void drawSlur(RenderSurface surface, StaffLayout staff, SlurPlacement slur) {
         double span = Math.abs(slur.x2() - slur.x1());
         double gap = staff.lineGap();
+        double avgY = (slur.y1() + slur.y2()) / 2.0;
         // A slur commonly arcs over/under several notes between its two
-        // endpoints, not just the endpoints themselves - a bend scaled only
-        // to the span (as ties use) can be too shallow to clear the notes
-        // in between, so floor it to a fraction of the staff-line gap too.
-        double bend = Math.max(gap * 1.3, span * 0.12) * (slur.curveUp() ? -1 : 1);
+        // endpoints, not just the endpoints themselves - e.g. a phrase that
+        // arches up to a peak and back down to roughly its starting pitch.
+        // A bend scaled only to the horizontal span (as ties use) can be far
+        // too shallow to clear that peak, so take whichever is more extreme
+        // of the default shallow-arc bend and the clearance actually needed
+        // to pass every notehead the slur spans (tracked in clearY).
         double midX = (slur.x1() + slur.x2()) / 2.0;
-        double midY = ((slur.y1() + slur.y2()) / 2.0) + bend;
+        double clearance = gap * 0.8;
+        double midY;
+        if (slur.curveUp()) {
+            double defaultPeak = avgY - Math.max(gap * 1.3, span * 0.12);
+            midY = Math.min(defaultPeak, slur.clearY() - clearance);
+        } else {
+            double defaultPeak = avgY + Math.max(gap * 1.3, span * 0.12);
+            midY = Math.max(defaultPeak, slur.clearY() + clearance);
+        }
         surface.strokeLine(slur.x1(), slur.y1(), midX, midY);
         surface.strokeLine(midX, midY, slur.x2(), slur.y2());
     }

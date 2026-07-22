@@ -137,7 +137,7 @@ public final class Engraver {
      * Half the maximum opening height (in staff-line gaps) of a crescendo/
      * diminuendo hairpin.
      */
-    private static final double HAIRPIN_HALF_HEIGHT_GAPS = 0.8;
+    private static final double HAIRPIN_HALF_HEIGHT_GAPS = 1.2;
 
     /**
      * Extra clearance (in staff-line gaps) above the highest notehead in a
@@ -1171,6 +1171,7 @@ public final class Engraver {
         List<SlurPlacement> slurs = new ArrayList<>();
         List<TupletPlacement> tuplets = new ArrayList<>();
         List<HairpinPlacement> hairpins = new ArrayList<>();
+        List<StemPlacement> stems = new ArrayList<>();
 
         Map<Integer, BeamRun> openBeams = new HashMap<>();
         Map<String, PlacedNote> tieCandidates = new HashMap<>();
@@ -1253,12 +1254,28 @@ public final class Engraver {
             // Fallback x when the measure has no time-consuming elements at all
             // (rare, but possible for a measure that only carries directions).
             double fallbackX = contentStart;
+            double[] stemTipY = new double[timedElements.size()];
+            boolean[] stemUpArr = new boolean[timedElements.size()];
+            boolean[] hasStemArr = new boolean[timedElements.size()];
+            computeStemTips(timedElements, currentClef, y, options, stemTipY, stemUpArr, hasStemArr);
+            // The highest point any stem/beam reaches in this measure, so an
+            // ABOVE-placed direction (a tempo marking, say) can be pushed
+            // clear of it instead of using a fixed offset from the staff -
+            // beams above notes with several ledger lines can reach well
+            // above a "normal" fixed clearance would assume.
+            double measureTopY = y;
+            for (int i = 0; i < stemTipY.length; i++) {
+                if (hasStemArr[i] && stemUpArr[i]) {
+                    measureTopY = Math.min(measureTopY, stemTipY[i]);
+                }
+            }
             for (int i = 0, timedIdx = 0; i < elements.size(); i++) {
                 MusicElement element = elements.get(i);
                 if (element instanceof Direction direction) {
                     double dirX = anchorX(timedX, timedIdx, fallbackX);
                     if (staffIdx == 0) {
-                        placeDirection(texts, glyphs, hairpins, wedgeCandidates, direction, dirX, y, options);
+                        placeDirection(texts, glyphs, hairpins, wedgeCandidates, direction, dirX, y, options,
+                                measureTopY);
                     }
                 } else if (element instanceof Harmony harmony) {
                     double harmonyX = anchorX(timedX, timedIdx, fallbackX);
@@ -1266,9 +1283,11 @@ public final class Engraver {
                         placeHarmony(texts, harmony, harmonyX, y, options);
                     }
                 } else {
-                    double noteX = timedX[timedIdx++];
-                    placeElement(glyphs, beams, ties, slurs, tuplets, openBeams, tieCandidates,
-                            slurCandidates, tupletCandidates, element, noteX, y, currentClef, options);
+                    int ti = timedIdx++;
+                    double noteX = timedX[ti];
+                    placeElement(glyphs, beams, ties, slurs, tuplets, stems, openBeams, tieCandidates,
+                            slurCandidates, tupletCandidates, element, noteX, y, currentClef, options,
+                            stemTipY[ti], stemUpArr[ti], hasStemArr[ti]);
                     if (staffIdx == 0) {
                         placeLyrics(texts, element, noteX, y, options);
                     }
@@ -1280,7 +1299,7 @@ public final class Engraver {
         }
 
         return new StaffLayout(x, y, cursorX - x, options.staffLineGap(),
-                measureLayouts, glyphs, beams, ties, slurs, tuplets, hairpins);
+                measureLayouts, glyphs, beams, ties, slurs, tuplets, hairpins, stems);
     }
 
     /**
@@ -1484,15 +1503,15 @@ public final class Engraver {
 
     private void placeElement(List<GlyphPlacement> glyphs, List<BeamPlacement> beams, List<TiePlacement> ties,
                               List<SlurPlacement> slurs, List<TupletPlacement> tuplets,
+                              List<StemPlacement> stems,
                               Map<Integer, BeamRun> openBeams, Map<String, PlacedNote> tieCandidates,
                               Map<Integer, SlurStart> slurCandidates, Map<Integer, TupletRun> tupletCandidates,
                               MusicElement element, double noteX, double staffY,
-                              Clef clef, LayoutOptions options) {
+                              Clef clef, LayoutOptions options, double stemTipY, boolean stemUp,
+                              boolean hasStem) {
         if (element instanceof Note note) {
-            int step = staffStep(note.pitch(), clef);
-            boolean stemUp = note.stemUp().orElse(step >= MIDDLE_LINE_STAFF_STEP);
-            placeNote(glyphs, beams, ties, slurs, tuplets, openBeams, tieCandidates, slurCandidates,
-                    tupletCandidates, note, noteX, staffY, clef, options, false, true, stemUp);
+            placeNote(glyphs, beams, ties, slurs, tuplets, stems, openBeams, tieCandidates, slurCandidates,
+                    tupletCandidates, note, noteX, staffY, clef, options, false, true, stemUp, stemTipY, hasStem);
         } else if (element instanceof Chord chord) {
             // A stacked chord shares exactly one stem (and one beam/flag)
             // across all its notes, anchored at whichever notehead sits
@@ -1500,38 +1519,20 @@ public final class Engraver {
             // MusicXML also puts <beam> elements only on one representative
             // note per chord (usually the first non-<chord/>-tagged one);
             // the other stacked notes carry an empty beams() list even
-            // though the whole chord is beamed.
+            // though the whole chord is beamed. Direction and tip are
+            // precomputed (see computeStemTips) from the true pitch extreme
+            // across the whole beamed run, not just this one chord.
             List<Note> notes = chord.notes();
-            Note outerNote = notes.get(0);
-            int outerDist = -1;
             Note beamDataNote = null;
             boolean chordBeamed = false;
-            Boolean explicitStemUp = null;
             for (Note note : notes) {
-                int step = staffStep(note.pitch(), clef);
-                int dist = Math.abs(step - MIDDLE_LINE_STAFF_STEP);
-                if (dist > outerDist) {
-                    outerDist = dist;
-                    outerNote = note;
-                }
                 if (note.isBeamed()) {
                     chordBeamed = true;
                     if (beamDataNote == null) {
                         beamDataNote = note;
                     }
                 }
-                if (explicitStemUp == null && note.stemUp().isPresent()) {
-                    explicitStemUp = note.stemUp().get();
-                }
             }
-            // All notes in a chord (and every note across a whole beamed
-            // group) must share one stem direction. MusicXML fixes this
-            // explicitly via <stem> on every note precisely so a pitch-based
-            // heuristic - which can disagree note-to-note as pitch varies
-            // across a beam run - never has to guess; prefer it when present.
-            boolean stemUp = explicitStemUp != null
-                    ? explicitStemUp
-                    : staffStep(outerNote.pitch(), clef) >= MIDDLE_LINE_STAFF_STEP;
             // The stem-responsible note is whichever carries the real beam
             // data when beamed; otherwise the notehead nearest the stem tip
             // (largest staffStep - i.e. lowest pitch - for stem-up, or
@@ -1549,9 +1550,9 @@ public final class Engraver {
                 }
             }
             for (Note note : notes) {
-                placeNote(glyphs, beams, ties, slurs, tuplets, openBeams, tieCandidates, slurCandidates,
+                placeNote(glyphs, beams, ties, slurs, tuplets, stems, openBeams, tieCandidates, slurCandidates,
                         tupletCandidates, note, noteX, staffY, clef, options, chordBeamed, note == stemNote,
-                        stemUp);
+                        stemUp, stemTipY, hasStem);
             }
         } else if (element instanceof Rest rest) {
             double gap = options.staffLineGap();
@@ -1576,29 +1577,34 @@ public final class Engraver {
     private void placeDirection(List<TextPlacement> texts, List<GlyphPlacement> glyphs,
                                 List<HairpinPlacement> hairpins, Map<Integer, WedgeStart> wedgeCandidates,
                                 Direction direction, double x, double staffY,
-                                LayoutOptions options) {
+                                LayoutOptions options, double measureTopY) {
         double gap = options.staffLineGap();
         Placement side = resolvedPlacement(direction);
         DirectionType type = direction.type();
+        // Clearance above the highest stem/beam/tuplet number this measure
+        // reaches, so an ABOVE-placed direction never sits under a beam that
+        // extends well past the staff (e.g. for notes on several ledger
+        // lines) - a fixed offset from the staff alone can't anticipate that.
+        double aboveFloor = Math.min(staffY, measureTopY - gap * (TUPLET_ABOVE_GAP + 1.5));
         if (type instanceof DirectionType.Words words) {
             double fontSize = gap * DIRECTION_FONT_SIZE_GAPS;
             double y = side == Placement.BELOW
                     ? staffY + options.staffHeight() + gap * DIRECTION_OFFSET_GAPS + fontSize
-                    : staffY - gap * DIRECTION_OFFSET_GAPS;
+                    : Math.min(staffY - gap * DIRECTION_OFFSET_GAPS, aboveFloor);
             texts.add(new TextPlacement(words.text(), x, y, fontSize,
                     TextPlacement.Align.LEFT, MarkingCategory.DIRECTION));
         } else if (type instanceof DirectionType.Metronome metronome) {
             double fontSize = gap * DIRECTION_FONT_SIZE_GAPS;
             double y = side == Placement.BELOW
                     ? staffY + options.staffHeight() + gap * DIRECTION_OFFSET_GAPS + fontSize
-                    : staffY - gap * DIRECTION_OFFSET_GAPS;
+                    : Math.min(staffY - gap * DIRECTION_OFFSET_GAPS, aboveFloor);
             String text = metronomeText(metronome);
             texts.add(new TextPlacement(text, x, y, fontSize,
                     TextPlacement.Align.LEFT, MarkingCategory.TEMPO));
         } else if (type instanceof DirectionType.Dynamic dynamic) {
             Glyph glyph = dynamicGlyph(dynamic.mark());
             double y = side == Placement.ABOVE
-                    ? staffY - gap * DIRECTION_OFFSET_GAPS - gap
+                    ? Math.min(staffY - gap * DIRECTION_OFFSET_GAPS - gap, aboveFloor - gap)
                     : staffY + options.staffHeight() + gap * DIRECTION_OFFSET_GAPS + gap;
             // Use a staff step well outside the staff so ledger-line hinting
             // never engages for the dynamic glyph.
@@ -1611,7 +1617,7 @@ public final class Engraver {
             // default from {@link #resolvedPlacement} yields ABOVE.
             double y = side == Placement.BELOW
                     ? staffY + options.staffHeight() + gap * DIRECTION_OFFSET_GAPS + fontSize
-                    : staffY - gap * DIRECTION_OFFSET_GAPS - fontSize;
+                    : Math.min(staffY - gap * DIRECTION_OFFSET_GAPS, aboveFloor) - fontSize;
             texts.add(new TextPlacement(rehearsal.label(), x, y, fontSize,
                     TextPlacement.Align.LEFT, MarkingCategory.REHEARSAL, true));
         } else if (type instanceof DirectionType.Wedge wedge) {
@@ -1772,11 +1778,12 @@ public final class Engraver {
     }
 
     private void placeNote(List<GlyphPlacement> glyphs, List<BeamPlacement> beams, List<TiePlacement> ties,
-                           List<SlurPlacement> slurs, List<TupletPlacement> tuplets,
+                           List<SlurPlacement> slurs, List<TupletPlacement> tuplets, List<StemPlacement> stems,
                            Map<Integer, BeamRun> openBeams, Map<String, PlacedNote> tieCandidates,
                            Map<Integer, SlurStart> slurCandidates, Map<Integer, TupletRun> tupletCandidates,
                            Note note, double noteX, double staffY, Clef clef, LayoutOptions options,
-                           boolean chordBeamed, boolean isStemResponsible, boolean stemUp) {
+                           boolean chordBeamed, boolean isStemResponsible, boolean stemUp,
+                           double stemTipY, boolean hasStem) {
         double gap = options.staffLineGap();
         int staffStep = staffStep(note.pitch(), clef);
         double y = staffY + staffStep * (gap / 2.0);
@@ -1796,12 +1803,23 @@ public final class Engraver {
 
         glyphs.add(new GlyphPlacement(noteX, y, noteheadGlyph(note.type()), staffStep));
 
-        Glyph stem = stemGlyph(note.type(), stemUp);
         // A chord shares one stem across all its notes, drawn once by
         // whichever note is stem-responsible (see placeElement); the other
-        // stacked notes must not each draw their own independent stem.
-        if (stem != null && isStemResponsible) {
-            glyphs.add(new GlyphPlacement(noteX, y, stem, staffStep));
+        // stacked notes must not each draw their own independent stem. Its
+        // length (stemTipY) is precomputed by computeStemTips from the true
+        // pitch extreme across the whole beamed run so every note in the
+        // run reaches the exact same beam height, and clears the staff when
+        // that extreme sits on a ledger line.
+        // Inset slightly from the notehead's exact geometric edge (rather
+        // than sitting exactly tangent to it): a straight stem only touches
+        // an elliptical notehead's true edge at one exact point, so any
+        // *other* notehead the same stem passes through (the far side of a
+        // chord, or a middle note in a flattened beam run) shows a visible
+        // sliver of a gap above/below that single tangent point otherwise.
+        double stemInset = noteheadHalfWidth(note.type(), gap) * 0.8;
+        double stemX = stemUp ? noteX + stemInset : noteX - stemInset;
+        if (hasStem && isStemResponsible) {
+            stems.add(new StemPlacement(stemX, y, stemTipY));
         }
 
         // Articulations sit on the side opposite the stem, clear of the notehead.
@@ -1809,7 +1827,7 @@ public final class Engraver {
             Glyph articulationGlyph = articulation == Articulation.STACCATO
                     ? Glyph.ARTICULATION_STACCATO
                     : Glyph.ARTICULATION_ACCENT;
-            double articulationY = stemUp ? y + gap * 1.8 : y - gap * 1.8;
+            double articulationY = stemUp ? y + gap * 2.6 : y - gap * 2.6;
             glyphs.add(new GlyphPlacement(noteX, articulationY, articulationGlyph, staffStep));
         }
 
@@ -1828,17 +1846,13 @@ public final class Engraver {
         // representative note's own placeNote call already drives
         // processBeams for the whole group.
         boolean beamed = note.isBeamed() || chordBeamed;
-        if (!beamed && stem != null && isStemResponsible) {
+        if (!beamed && hasStem && isStemResponsible) {
             Glyph flag = flagGlyph(note.type(), stemUp);
             if (flag != null) {
-                double stemTipY = stemUp ? y - gap * STEM_LENGTH_GAPS : y + gap * STEM_LENGTH_GAPS;
-                double stemTipX = stemUp ? noteX + noteheadHalfWidth(note.type(), gap) : noteX - noteheadHalfWidth(note.type(), gap);
-                glyphs.add(new GlyphPlacement(stemTipX, stemTipY, flag, staffStep));
+                glyphs.add(new GlyphPlacement(stemX, stemTipY, flag, staffStep));
             }
-        } else if (note.isBeamed() && stem != null && isStemResponsible) {
-            double stemTipX = stemUp ? noteX + noteheadHalfWidth(note.type(), gap) : noteX - noteheadHalfWidth(note.type(), gap);
-            double stemTipY = stemUp ? y - gap * STEM_LENGTH_GAPS : y + gap * STEM_LENGTH_GAPS;
-            processBeams(beams, openBeams, note.beams(), stemTipX, stemTipY, stemUp);
+        } else if (note.isBeamed() && hasStem && isStemResponsible) {
+            processBeams(beams, openBeams, note.beams(), stemX, stemTipY, stemUp);
         }
 
         // Ties: if this note carries tieStart, remember it; if it carries
@@ -1859,7 +1873,16 @@ public final class Engraver {
         }
 
         // Slurs: matched by number rather than pitch, since a slur spans a
-        // phrase rather than a single repeated pitch.
+        // phrase rather than a single repeated pitch. A slur can swing
+        // through notes far higher/lower than its own start/stop pitch (an
+        // arpeggio arching up to a peak and back down, say), so every open
+        // slur's pitch extremes are tracked across the whole span - not just
+        // its two endpoints - the same way tuplet runs track their highest
+        // notehead, so the curve is guaranteed to clear everything it spans.
+        for (SlurStart start : slurCandidates.values()) {
+            start.minY = Math.min(start.minY, y);
+            start.maxY = Math.max(start.maxY, y);
+        }
         for (Slur slur : note.slurs()) {
             if (slur.type() == Slur.Type.STOP) {
                 SlurStart start = slurCandidates.remove(slur.number());
@@ -1870,22 +1893,27 @@ public final class Engraver {
                     // is wrong for a slur spanning notes of varying pitch -
                     // it can bend the curve back into the very notes it
                     // spans instead of arcing clear of them.
-                    boolean curveUp = switch (start.placement()) {
+                    boolean curveUp = switch (start.placement) {
                         case ABOVE -> true;
                         case BELOW -> false;
                         case DEFAULT -> staffStep >= MIDDLE_LINE_STAFF_STEP;
                     };
                     double yShift = curveUp ? -gap * 0.8 : gap * 0.8;
-                    slurs.add(new SlurPlacement(start.x() + gap * 0.5, start.y() + yShift,
-                            noteX - gap * 0.5, y + yShift, curveUp));
+                    double clearY = curveUp ? start.minY : start.maxY;
+                    slurs.add(new SlurPlacement(start.x + gap * 0.5, start.y + yShift,
+                            noteX - gap * 0.5, y + yShift, curveUp, clearY));
                 }
             } else {
                 slurCandidates.put(slur.number(), new SlurStart(noteX, y, slur.placement()));
             }
         }
 
+        // Track the stem/beam tip (not just the notehead) so a tuplet number
+        // over a beamed run clears the beam itself, not just the noteheads -
+        // the beam commonly reaches well above the highest notehead.
+        double tupletTrackedY = hasStem && stemUp ? Math.min(stemTipY, y) : y;
         updateTupletCandidates(tupletCandidates, tuplets, note.tuplets(), note.timeModification(),
-                noteX, y, gap);
+                noteX, tupletTrackedY, gap);
     }
 
     private static double noteheadHalfWidth(NoteType type, double gap) {
@@ -1946,13 +1974,13 @@ public final class Engraver {
     }
 
     /**
-     * Choose the stem glyph for a note's type and direction. Whole/breve/
-     * long/maxima notes have no stem.
+     * Whether a note of this type has a stem at all. Whole/breve/long/maxima
+     * notes don't.
      */
-    static Glyph stemGlyph(NoteType type, boolean stemUp) {
+    static boolean hasStemForType(NoteType type) {
         return switch (type) {
-            case WHOLE, BREVE, LONG, MAXIMA -> null;
-            default -> stemUp ? Glyph.STEM_UP : Glyph.STEM_DOWN;
+            case WHOLE, BREVE, LONG, MAXIMA -> false;
+            default -> true;
         };
     }
 
@@ -2022,7 +2050,26 @@ public final class Engraver {
     private record PlacedNote(double x, double y) {
     }
 
-    private record SlurStart(double x, double y, Placement placement) {
+    /**
+     * Mutable state for an open slur: its start x/y and placement are fixed,
+     * but {@code minY}/{@code maxY} track the pitch extremes of every note
+     * the slur spans (not just its start/stop), so the curve can be sized
+     * to clear a peak or trough in the middle of the phrase.
+     */
+    private static final class SlurStart {
+        final double x;
+        final double y;
+        final Placement placement;
+        double minY;
+        double maxY;
+
+        SlurStart(double x, double y, Placement placement) {
+            this.x = x;
+            this.y = y;
+            this.placement = placement;
+            this.minY = y;
+            this.maxY = y;
+        }
     }
 
     private record WedgeStart(double x, double y, boolean crescendo) {
@@ -2076,6 +2123,144 @@ public final class Engraver {
                     tuplets.add(new TupletPlacement(run.startX, x,
                             run.minY - gap * TUPLET_ABOVE_GAP, number, run.bracket));
                 }
+            }
+        }
+    }
+
+    /**
+     * A note/chord's stem direction and tip, computed from its own pitch(es)
+     * alone - before any beam-run-wide sharing is applied. {@code null} for
+     * elements with no stem (rests, whole/breve/long/maxima notes).
+     */
+    private record NaturalStem(boolean stemUp, double tipY) {
+    }
+
+    /**
+     * Direction and length a single note or chord's stem would have in
+     * isolation: explicit {@code <stem>} wins when present (checking every
+     * note of a chord, since MusicXML normally repeats the same value on
+     * each), otherwise the pitch farthest from the middle line decides.
+     * The tip is measured from the pitch <em>extreme</em> in the stem
+     * direction - the highest notehead for stem-up, lowest for stem-down -
+     * across every note of a chord, not just one, so it's guaranteed to
+     * clear every notehead the stem passes through.
+     */
+    private static NaturalStem naturalStem(MusicElement element, double staffY, Clef clef, LayoutOptions options) {
+        double gap = options.staffLineGap();
+        if (element instanceof Note note) {
+            if (!hasStemForType(note.type())) {
+                return null;
+            }
+            int step = staffStep(note.pitch(), clef);
+            double y = staffY + step * (gap / 2.0);
+            boolean stemUp = note.stemUp().orElse(step >= MIDDLE_LINE_STAFF_STEP);
+            double tipY = stemUp ? y - gap * STEM_LENGTH_GAPS : y + gap * STEM_LENGTH_GAPS;
+            return new NaturalStem(stemUp, tipY);
+        }
+        if (element instanceof Chord chord) {
+            List<Note> notes = chord.notes();
+            if (notes.isEmpty() || !hasStemForType(notes.get(0).type())) {
+                return null;
+            }
+            Note outerNote = notes.get(0);
+            int outerDist = -1;
+            Boolean explicitStemUp = null;
+            double minY = Double.MAX_VALUE;
+            double maxY = -Double.MAX_VALUE;
+            for (Note note : notes) {
+                int step = staffStep(note.pitch(), clef);
+                double noteY = staffY + step * (gap / 2.0);
+                minY = Math.min(minY, noteY);
+                maxY = Math.max(maxY, noteY);
+                int dist = Math.abs(step - MIDDLE_LINE_STAFF_STEP);
+                if (dist > outerDist) {
+                    outerDist = dist;
+                    outerNote = note;
+                }
+                if (explicitStemUp == null && note.stemUp().isPresent()) {
+                    explicitStemUp = note.stemUp().get();
+                }
+            }
+            boolean stemUp = explicitStemUp != null
+                    ? explicitStemUp
+                    : staffStep(outerNote.pitch(), clef) >= MIDDLE_LINE_STAFF_STEP;
+            double tipY = stemUp ? minY - gap * STEM_LENGTH_GAPS : maxY + gap * STEM_LENGTH_GAPS;
+            return new NaturalStem(stemUp, tipY);
+        }
+        return null;
+    }
+
+    /**
+     * The given beam level's state on an element, or {@code null} if it
+     * carries no such level (including rests, and chord members other than
+     * whichever one MusicXML put the {@code <beam>} elements on).
+     */
+    private static Beam.State beamLevelState(MusicElement element, int level) {
+        List<Beam> beamList;
+        if (element instanceof Note note) {
+            beamList = note.beams();
+        } else if (element instanceof Chord chord) {
+            beamList = List.of();
+            for (Note note : chord.notes()) {
+                if (!note.beams().isEmpty()) {
+                    beamList = note.beams();
+                    break;
+                }
+            }
+        } else {
+            return null;
+        }
+        for (Beam b : beamList) {
+            if (b.number() == level) {
+                return b.state();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Fill {@code outTipY}/{@code outStemUp}/{@code outHasStem} (one entry
+     * per element in {@code elements}, same order) with each element's stem
+     * geometry. Elements are first given their own {@link #naturalStem}
+     * independently; then every level-1 beam run (start..end) is flattened
+     * to share one direction and one tip - the extreme across every note
+     * the whole run spans, not just each note's own pitch - so every stem
+     * in the run reaches the identical beam height instead of each
+     * independently falling short of or overshooting it.
+     */
+    private static void computeStemTips(List<MusicElement> elements, Clef clef, double staffY,
+                                        LayoutOptions options, double[] outTipY, boolean[] outStemUp,
+                                        boolean[] outHasStem) {
+        for (int i = 0; i < elements.size(); i++) {
+            NaturalStem ns = naturalStem(elements.get(i), staffY, clef, options);
+            outHasStem[i] = ns != null;
+            if (ns != null) {
+                outStemUp[i] = ns.stemUp();
+                outTipY[i] = ns.tipY();
+            }
+        }
+        int runStart = -1;
+        for (int i = 0; i < elements.size(); i++) {
+            Beam.State state = beamLevelState(elements.get(i), 1);
+            if (state == null) {
+                continue;
+            }
+            if (state == Beam.State.BEGIN) {
+                runStart = i;
+            } else if (state == Beam.State.END && runStart >= 0) {
+                boolean up = outStemUp[runStart];
+                double extreme = outTipY[runStart];
+                for (int j = runStart; j <= i; j++) {
+                    if (!outHasStem[j]) {
+                        continue;
+                    }
+                    extreme = up ? Math.min(extreme, outTipY[j]) : Math.max(extreme, outTipY[j]);
+                }
+                for (int j = runStart; j <= i; j++) {
+                    outTipY[j] = extreme;
+                    outStemUp[j] = up;
+                }
+                runStart = -1;
             }
         }
     }
