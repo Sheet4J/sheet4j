@@ -1,15 +1,15 @@
 package com.sheetmusic4j.fxviewer;
 
+import com.sheetmusic4j.core.model.Accidental;
+import com.sheetmusic4j.core.model.MusicElement;
+import com.sheetmusic4j.engraving.glyph.MarkingCategory;
+import com.sheetmusic4j.engraving.layout.LayoutResult;
+import com.sheetmusic4j.engraving.placement.BracketPlacement;
+import javafx.scene.canvas.GraphicsContext;
+
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
-
-import com.sheetmusic4j.core.model.MusicElement;
-import com.sheetmusic4j.engraving.layout.LayoutResult;
-import com.sheetmusic4j.engraving.glyph.MarkingCategory;
-
-import com.sheetmusic4j.engraving.placement.BracketPlacement;
-import javafx.scene.canvas.GraphicsContext;
 
 /**
  * Draws a {@link LayoutResult} onto a JavaFX {@link GraphicsContext}. This is a thin
@@ -20,11 +20,15 @@ public final class ScoreRenderer {
 
     private final ScorePainter painter = new ScorePainter();
 
-    /** Creates a renderer that delegates all drawing to {@link ScorePainter}. */
+    /**
+     * Creates a renderer that delegates all drawing to {@link ScorePainter}.
+     */
     public ScoreRenderer() {
     }
 
-    /** Renders the given layout into the supplied JavaFX graphics context. */
+    /**
+     * Renders the given layout into the supplied JavaFX graphics context.
+     */
     public void render(GraphicsContext gc, LayoutResult layout) {
         render(gc, layout, gc.getCanvas().getWidth(), gc.getCanvas().getHeight());
     }
@@ -39,6 +43,13 @@ public final class ScoreRenderer {
     }
 
     /**
+     * @return the current set of hidden categories (defensive copy).
+     */
+    public Set<MarkingCategory> getHiddenTextCategories() {
+        return painter.getHiddenCategories();
+    }
+
+    /**
      * Configure which {@link MarkingCategory categories} the underlying
      * painter should skip. See {@link ScorePainter#setHiddenCategories(Set)}.
      */
@@ -46,9 +57,11 @@ public final class ScoreRenderer {
         painter.setHiddenCategories(categories);
     }
 
-    /** @return the current set of hidden categories (defensive copy). */
-    public Set<MarkingCategory> getHiddenTextCategories() {
-        return painter.getHiddenCategories();
+    /**
+     * @return whether brackets are currently drawn by the underlying painter.
+     */
+    public boolean isBracketsVisible() {
+        return painter.isBracketsVisible();
     }
 
     /**
@@ -59,11 +72,6 @@ public final class ScoreRenderer {
      */
     public void setBracketsVisible(boolean visible) {
         painter.setBracketsVisible(visible);
-    }
-
-    /** @return whether brackets are currently drawn by the underlying painter. */
-    public boolean isBracketsVisible() {
-        return painter.isBracketsVisible();
     }
 
     /**
@@ -81,4 +89,13 @@ public final class ScoreRenderer {
     public void setNoteBackgroundProvider(Function<MusicElement, Optional<RenderColor>> provider) {
         painter.setNoteBackgroundProvider(provider);
     }
+
+    /**
+     * Install a per-element accidental override provider on the
+     * underlying painter. See
+     * {@link ScorePainter#setNoteAccidentalProvider(Function)}.
+     */
+    public void setNoteAccidentalProvider(Function<MusicElement, Optional<Accidental>> provider) {
+        painter.setNoteAccidentalProvider(provider);
     }
+}

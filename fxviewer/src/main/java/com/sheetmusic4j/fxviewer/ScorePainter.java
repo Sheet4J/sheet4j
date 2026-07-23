@@ -1,28 +1,16 @@
 package com.sheetmusic4j.fxviewer;
 
+import com.sheetmusic4j.core.model.Accidental;
+import com.sheetmusic4j.core.model.MusicElement;
+import com.sheetmusic4j.engraving.glyph.Glyph;
+import com.sheetmusic4j.engraving.glyph.MarkingCategory;
+import com.sheetmusic4j.engraving.layout.*;
+import com.sheetmusic4j.engraving.placement.*;
+
 import java.util.EnumSet;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
-
-import com.sheetmusic4j.core.model.MusicElement;
-import com.sheetmusic4j.engraving.placement.BeamPlacement;
-import com.sheetmusic4j.engraving.placement.BracketPlacement;
-import com.sheetmusic4j.engraving.glyph.Glyph;
-import com.sheetmusic4j.engraving.placement.GlyphPlacement;
-import com.sheetmusic4j.engraving.placement.HairpinPlacement;
-import com.sheetmusic4j.engraving.layout.LayoutResult;
-import com.sheetmusic4j.engraving.glyph.MarkingCategory;
-import com.sheetmusic4j.engraving.layout.MeasureLayout;
-import com.sheetmusic4j.engraving.layout.NoteAnchor;
-import com.sheetmusic4j.engraving.placement.SlurPlacement;
-import com.sheetmusic4j.engraving.placement.StemPlacement;
-import com.sheetmusic4j.engraving.layout.StaffLayout;
-import com.sheetmusic4j.engraving.layout.SystemBarline;
-import com.sheetmusic4j.engraving.layout.SystemLayout;
-import com.sheetmusic4j.engraving.placement.TextPlacement;
-import com.sheetmusic4j.engraving.placement.TiePlacement;
-import com.sheetmusic4j.engraving.placement.TupletPlacement;
 
 /**
  * Surface-agnostic painting of a {@link LayoutResult}. All drawing goes through a
@@ -50,13 +38,19 @@ public final class ScorePainter {
      */
     private static final double BG_PAD_LEFT_GAPS = 2.2;
 
-    /** Horizontal padding to the right of a note-background rectangle. */
+    /**
+     * Horizontal padding to the right of a note-background rectangle.
+     */
     private static final double BG_PAD_RIGHT_GAPS = 0.6;
 
-    /** Vertical padding above/below a note-background rectangle. */
+    /**
+     * Vertical padding above/below a note-background rectangle.
+     */
     private static final double BG_PAD_Y_GAPS = 0.4;
 
-    /** Corner arc radius for a note-background rectangle, in staff-line gaps. */
+    /**
+     * Corner arc radius for a note-background rectangle, in staff-line gaps.
+     */
     private static final double BG_ARC_GAPS = 1.0;
 
     private final EnumSet<MarkingCategory> hiddenCategories =
@@ -82,8 +76,138 @@ public final class ScorePainter {
      */
     private Function<MusicElement, Optional<RenderColor>> noteBackgroundProvider;
 
-    /** Creates a painter for rendering a layout onto any {@link RenderSurface}. */
+    /**
+     * Optional per-element accidental override provider. When set, the
+     * returned {@link Accidental} (if any) is drawn to the left of that
+     * element's notehead at the same {@code noteX - gap * 1.5} offset the
+     * engraver uses for engraved accidentals. Any engraved accidental on
+     * the same element is suppressed for as long as the override is
+     * present. {@code null} disables the mechanism.
+     */
+    private Function<MusicElement, Optional<Accidental>> noteAccidentalProvider;
+
+    /**
+     * Creates a painter for rendering a layout onto any {@link RenderSurface}.
+     */
     public ScorePainter() {
+    }
+
+    /**
+     * Reference staff-line gap used to size layout-wide highlights. Uses
+     * the first staff's gap when available; falls back to a sensible
+     * constant when the layout carries no staves (e.g. an empty score).
+     */
+    private static double referenceLineGap(LayoutResult layout) {
+        for (SystemLayout system : layout.systems()) {
+            for (StaffLayout staff : system.staves()) {
+                return staff.lineGap();
+            }
+        }
+        return 10.0;
+    }
+
+    /**
+     * SMuFL glyph draw centered on ({@code centerX}, {@code centerY}) by
+     * shifting the left-edge origin by half the glyph's advance width.
+     */
+    private static boolean drawSmuflCentered(RenderSurface surface, Glyph glyph,
+                                             double centerX, double centerY, double sizeHint) {
+        String codepoint = SmuflGlyphs.codepoint(glyph);
+        if (codepoint == null) {
+            return false;
+        }
+        double halfW = SmuflGlyphs.halfAdvanceWidth(glyph, sizeHint);
+        return surface.drawSmuflGlyph(codepoint, centerX - halfW, centerY, sizeHint);
+    }
+
+    private static boolean drawSmuflIfAvailable(RenderSurface surface, Glyph glyph, GlyphPlacement placement,
+                                                double sizeHint) {
+        String codepoint = SmuflGlyphs.codepoint(glyph);
+        if (codepoint == null) {
+            return false;
+        }
+        return surface.drawSmuflGlyph(codepoint, placement.x(), placement.y(), sizeHint);
+    }
+
+    private static void drawNoteheadPrimitive(RenderSurface surface, Glyph g, GlyphPlacement glyph,
+                                              double headW, double headH) {
+        switch (g) {
+            case NOTEHEAD_BLACK -> surface.fillOval(glyph.x() - headW / 2, glyph.y() - headH / 2, headW, headH);
+            case NOTEHEAD_HALF, NOTEHEAD_WHOLE ->
+                    surface.strokeOval(glyph.x() - headW / 2, glyph.y() - headH / 2, headW, headH);
+            default -> {
+            }
+        }
+    }
+
+    private static String clefLetter(Glyph glyph) {
+        return switch (glyph) {
+            case CLEF_F -> "F";
+            case CLEF_C -> "C";
+            default -> "G";
+        };
+    }
+
+    private static String dynamicFallback(Glyph glyph) {
+        return switch (glyph) {
+            case DYNAMIC_PPP -> "ppp";
+            case DYNAMIC_PP -> "pp";
+            case DYNAMIC_P -> "p";
+            case DYNAMIC_MP -> "mp";
+            case DYNAMIC_MF -> "mf";
+            case DYNAMIC_F -> "f";
+            case DYNAMIC_FF -> "ff";
+            case DYNAMIC_FFF -> "fff";
+            case DYNAMIC_SF -> "sf";
+            case DYNAMIC_SFZ -> "sfz";
+            case DYNAMIC_FZ -> "fz";
+            case DYNAMIC_FP -> "fp";
+            case DYNAMIC_RF -> "rf";
+            case DYNAMIC_RFZ -> "rfz";
+            case DYNAMIC_NIENTE -> "n";
+            default -> "";
+        };
+    }
+
+    private static Glyph accidentalToGlyph(Accidental accidental) {
+        return switch (accidental) {
+            case SHARP -> Glyph.ACCIDENTAL_SHARP;
+            case FLAT -> Glyph.ACCIDENTAL_FLAT;
+            case NATURAL -> Glyph.ACCIDENTAL_NATURAL;
+            case DOUBLE_SHARP -> Glyph.ACCIDENTAL_DOUBLE_SHARP;
+            case DOUBLE_FLAT -> Glyph.ACCIDENTAL_DOUBLE_FLAT;
+        };
+    }
+
+    private static boolean isAccidentalGlyph(Glyph glyph) {
+        return switch (glyph) {
+            case ACCIDENTAL_SHARP, ACCIDENTAL_FLAT, ACCIDENTAL_NATURAL,
+                 ACCIDENTAL_DOUBLE_SHARP, ACCIDENTAL_DOUBLE_FLAT -> true;
+            default -> false;
+        };
+    }
+
+    private static boolean isNoteheadGlyph(Glyph glyph) {
+        return switch (glyph) {
+            case NOTEHEAD_BLACK, NOTEHEAD_HALF, NOTEHEAD_WHOLE -> true;
+            default -> false;
+        };
+    }
+
+    private static String accidentalFallback(Glyph glyph) {
+        return switch (glyph) {
+            case ACCIDENTAL_SHARP, ACCIDENTAL_DOUBLE_SHARP -> "#";
+            case ACCIDENTAL_FLAT, ACCIDENTAL_DOUBLE_FLAT -> "b";
+            case ACCIDENTAL_NATURAL -> "n";
+            default -> "";
+        };
+    }
+
+    /**
+     * Whether {@link BracketPlacement bracket placements} are drawn.
+     */
+    public boolean isBracketsVisible() {
+        return bracketsVisible;
     }
 
     /**
@@ -97,11 +221,6 @@ public final class ScorePainter {
      */
     public void setBracketsVisible(boolean visible) {
         this.bracketsVisible = visible;
-    }
-
-    /** Whether {@link BracketPlacement bracket placements} are drawn. */
-    public boolean isBracketsVisible() {
-        return bracketsVisible;
     }
 
     /**
@@ -135,6 +254,26 @@ public final class ScorePainter {
     }
 
     /**
+     * Install a per-element accidental override provider. When the
+     * returned {@link Accidental} is present, its SMuFL glyph is drawn to
+     * the immediate left of that element's notehead - at the same
+     * {@code noteX - gap * 1.5} offset the engraver uses for engraved
+     * accidentals - and any engraved accidental originally emitted for
+     * that element is suppressed. {@code null} disables the mechanism.
+     *
+     * <p>Independent of {@link #setNoteColorProvider} and
+     * {@link #setNoteBackgroundProvider}: an element can carry any
+     * combination of tint, background, and accidental overlay. When a
+     * tint is also active, the overlay accidental inherits it so the
+     * overlay reads as part of the tinted note.
+     *
+     * @param provider the provider, or {@code null} to disable overlays
+     */
+    public void setNoteAccidentalProvider(Function<MusicElement, Optional<Accidental>> provider) {
+        this.noteAccidentalProvider = provider;
+    }
+
+    /**
      * Look up the highlight colour for the given source element, if any.
      * Returns {@code null} when no provider is installed, no element is
      * associated, or the provider returned an empty optional.
@@ -160,6 +299,27 @@ public final class ScorePainter {
     }
 
     /**
+     * Look up the accidental override for the given source element, if
+     * any. Same semantics as {@link #colorFor}.
+     */
+    private Accidental accidentalOverrideFor(MusicElement element) {
+        if (element == null || noteAccidentalProvider == null) {
+            return null;
+        }
+        Optional<Accidental> a = noteAccidentalProvider.apply(element);
+        return a == null ? null : a.orElse(null);
+    }
+
+    /**
+     * Currently hidden categories (a defensive copy).
+     */
+    public Set<MarkingCategory> getHiddenCategories() {
+        return hiddenCategories.isEmpty()
+                ? EnumSet.noneOf(MarkingCategory.class)
+                : EnumSet.copyOf(hiddenCategories);
+    }
+
+    /**
      * Replace the set of {@link MarkingCategory categories} that should be
      * skipped during painting. Hidden content still consumes vertical space
      * at the engraver — reclaiming that gap is a follow-up.
@@ -173,19 +333,19 @@ public final class ScorePainter {
         }
     }
 
-    /** Currently hidden categories (a defensive copy). */
-    public Set<MarkingCategory> getHiddenCategories() {
-        return hiddenCategories.isEmpty()
-                ? EnumSet.noneOf(MarkingCategory.class)
-                : EnumSet.copyOf(hiddenCategories);
-    }
+    /**
+     * Draw a tie as a shallow curve approximated with two lines meeting at
+     * the peak. Callers that need a real curve should override this via a
+     * dedicated surface primitive; the two-segment approximation is enough
+     * for the diagnostic comparator's window-level similarity check.
+     */
 
     /**
      * Paints the given layout onto the provided surface.
      *
-     * @param surface surface abstraction to draw on
-     * @param layout engraved score layout to paint
-     * @param surfaceWidth available surface width
+     * @param surface       surface abstraction to draw on
+     * @param layout        engraved score layout to paint
+     * @param surfaceWidth  available surface width
      * @param surfaceHeight available surface height
      */
     public void paint(RenderSurface surface, LayoutResult layout, double surfaceWidth, double surfaceHeight) {
@@ -220,30 +380,30 @@ public final class ScorePainter {
                     drawBracket(surface, bracket);
                 }
             }
-            }
-            }
-
-        /**
-        * Whether the given category should be skipped by the current painter.
-        * Package-private for tests.
-        */
-        boolean isHidden(MarkingCategory category) {
-        return hiddenCategories.contains(category);
         }
+    }
 
-        /**
-        * Draw a rounded, semi-transparent rectangle behind every element that
-        * carries a background colour. Iterates {@link LayoutResult#noteAnchors()}
-        * once; anchors whose element resolves to {@code null} in the
-        * background provider are skipped. No-op when no background provider
-        * is installed.
-        *
-        * <p>The rectangle is sized to cover the notehead plus a wider slot on
-        * the left (for the accidental) and a narrower one on the right (for
-        * augmentation dots). Padding scales with the layout's staff-line gap
-        * so backgrounds keep their proportion at any zoom level.
-        */
-        private void drawNoteBackgrounds(RenderSurface surface, LayoutResult layout) {
+    /**
+     * Whether the given category should be skipped by the current painter.
+     * Package-private for tests.
+     */
+    boolean isHidden(MarkingCategory category) {
+        return hiddenCategories.contains(category);
+    }
+
+    /**
+     * Draw a rounded, semi-transparent rectangle behind every element that
+     * carries a background colour. Iterates {@link LayoutResult#noteAnchors()}
+     * once; anchors whose element resolves to {@code null} in the
+     * background provider are skipped. No-op when no background provider
+     * is installed.
+     *
+     * <p>The rectangle is sized to cover the notehead plus a wider slot on
+     * the left (for the accidental) and a narrower one on the right (for
+     * augmentation dots). Padding scales with the layout's staff-line gap
+     * so backgrounds keep their proportion at any zoom level.
+     */
+    private void drawNoteBackgrounds(RenderSurface surface, LayoutResult layout) {
         if (noteBackgroundProvider == null) {
             return;
         }
@@ -267,21 +427,7 @@ public final class ScorePainter {
             double rectY = anchor.y() - rectHeight / 2.0;
             surface.fillRoundedRect(rectX, rectY, rectWidth, rectHeight, arc, arc, bg);
         }
-        }
-
-        /**
-        * Reference staff-line gap used to size layout-wide highlights. Uses
-        * the first staff's gap when available; falls back to a sensible
-        * constant when the layout carries no staves (e.g. an empty score).
-        */
-        private static double referenceLineGap(LayoutResult layout) {
-        for (SystemLayout system : layout.systems()) {
-            for (StaffLayout staff : system.staves()) {
-                return staff.lineGap();
-            }
-        }
-        return 10.0;
-        }
+    }
 
     /**
      * Draw a page-level {@link TextPlacement}. Alignment is approximated by
@@ -326,7 +472,20 @@ public final class ScorePainter {
             if (hiddenCategories.contains(glyph.category())) {
                 continue;
             }
+            MusicElement element = glyph.elementRef();
+            if (isAccidentalGlyph(glyph.glyph()) && accidentalOverrideFor(element) != null) {
+                // An override is active for this element - suppress the
+                // engraved accidental, the overlay drawn alongside the
+                // notehead below replaces it.
+                continue;
+            }
             drawGlyph(surface, staff, glyph);
+            if (isNoteheadGlyph(glyph.glyph())) {
+                Accidental overlay = accidentalOverrideFor(element);
+                if (overlay != null) {
+                    drawOverlayAccidental(surface, staff, glyph, overlay);
+                }
+            }
         }
 
         for (BeamPlacement beam : staff.beams()) {
@@ -415,7 +574,7 @@ public final class ScorePainter {
                 drawSmuflIfAvailable(surface, g, glyph, sizeHint);
             }
             case ACCIDENTAL_SHARP, ACCIDENTAL_FLAT, ACCIDENTAL_NATURAL,
-                    ACCIDENTAL_DOUBLE_SHARP, ACCIDENTAL_DOUBLE_FLAT -> {
+                 ACCIDENTAL_DOUBLE_SHARP, ACCIDENTAL_DOUBLE_FLAT -> {
                 if (!drawSmuflCentered(surface, g, glyph.x(), glyph.y(), sizeHint)) {
                     surface.strokeText(accidentalFallback(g), glyph.x(), glyph.y() + gap * 0.4);
                 }
@@ -438,8 +597,8 @@ public final class ScorePainter {
                 }
             }
             case DYNAMIC_PPP, DYNAMIC_PP, DYNAMIC_P, DYNAMIC_MP, DYNAMIC_MF,
-                    DYNAMIC_F, DYNAMIC_FF, DYNAMIC_FFF, DYNAMIC_SF, DYNAMIC_SFZ,
-                    DYNAMIC_FZ, DYNAMIC_FP, DYNAMIC_RF, DYNAMIC_RFZ, DYNAMIC_NIENTE -> {
+                 DYNAMIC_F, DYNAMIC_FF, DYNAMIC_FFF, DYNAMIC_SF, DYNAMIC_SFZ,
+                 DYNAMIC_FZ, DYNAMIC_FP, DYNAMIC_RF, DYNAMIC_RFZ, DYNAMIC_NIENTE -> {
                 if (!drawSmuflCentered(surface, g, glyph.x(), glyph.y(), sizeHint)) {
                     surface.strokeText(dynamicFallback(g), glyph.x(), glyph.y() + gap * 0.4);
                 }
@@ -497,15 +656,15 @@ public final class ScorePainter {
                 }
                 // STAFF_LINE / LEDGER_LINE / legacy STEM / BEAM handled elsewhere.
             }
-            }
-            }
+        }
+    }
 
-            /**
-            * Draw a beam segment as a thick rectangle (axis-aligned MVP; a full
-            * implementation would use a rotated polygon). Multi-level beams are
-            * stacked below (for stem-up groups) / above (stem-down groups) the
-            * primary beam.
-            */
+    /**
+     * Draw a beam segment as a thick rectangle (axis-aligned MVP; a full
+     * implementation would use a rotated polygon). Multi-level beams are
+     * stacked below (for stem-up groups) / above (stem-down groups) the
+     * primary beam.
+     */
     private void drawBeam(RenderSurface surface, StaffLayout staff, BeamPlacement beam) {
         double gap = staff.lineGap();
         double thickness = gap * 0.5;
@@ -519,12 +678,6 @@ public final class ScorePainter {
         surface.fillRect(x1, y - thickness / 2, x2 - x1, thickness);
     }
 
-    /**
-     * Draw a tie as a shallow curve approximated with two lines meeting at
-     * the peak. Callers that need a real curve should override this via a
-     * dedicated surface primitive; the two-segment approximation is enough
-     * for the diagnostic comparator's window-level similarity check.
-     */
     /**
      * Strokes a smooth rounded arc from ({@code x1},{@code y1}) to
      * ({@code x2},{@code y2}) whose apex reaches {@code peakY}, using a
@@ -635,76 +788,24 @@ public final class ScorePainter {
     }
 
     /**
-     * SMuFL glyph draw centered on ({@code centerX}, {@code centerY}) by
-     * shifting the left-edge origin by half the glyph's advance width.
+     * Draw an overlay accidental for the given notehead placement. The
+     * glyph is positioned at {@code (notehead.x() - gap * 1.5,
+     * notehead.y())} - matching the engraver's own accidental placement
+     * byte-for-byte - so callers get identical geometry whether the
+     * accidental comes from the model or from the overlay map. When the
+     * source note carries a colour tint, the overlay accidental is drawn
+     * with the same tint since we go through the standard
+     * {@link #drawGlyph} path.
      */
-    private static boolean drawSmuflCentered(RenderSurface surface, Glyph glyph,
-                                             double centerX, double centerY, double sizeHint) {
-        String codepoint = SmuflGlyphs.codepoint(glyph);
-        if (codepoint == null) {
-            return false;
-        }
-        double halfW = SmuflGlyphs.halfAdvanceWidth(glyph, sizeHint);
-        return surface.drawSmuflGlyph(codepoint, centerX - halfW, centerY, sizeHint);
-    }
-
-    private static boolean drawSmuflIfAvailable(RenderSurface surface, Glyph glyph, GlyphPlacement placement,
-                                                double sizeHint) {
-        String codepoint = SmuflGlyphs.codepoint(glyph);
-        if (codepoint == null) {
-            return false;
-        }
-        return surface.drawSmuflGlyph(codepoint, placement.x(), placement.y(), sizeHint);
-    }
-
-    private static void drawNoteheadPrimitive(RenderSurface surface, Glyph g, GlyphPlacement glyph,
-                                              double headW, double headH) {
-        switch (g) {
-            case NOTEHEAD_BLACK ->
-                    surface.fillOval(glyph.x() - headW / 2, glyph.y() - headH / 2, headW, headH);
-            case NOTEHEAD_HALF, NOTEHEAD_WHOLE ->
-                    surface.strokeOval(glyph.x() - headW / 2, glyph.y() - headH / 2, headW, headH);
-            default -> {
-            }
-        }
-    }
-
-    private static String clefLetter(Glyph glyph) {
-        return switch (glyph) {
-            case CLEF_F -> "F";
-            case CLEF_C -> "C";
-            default -> "G";
-        };
-    }
-
-    private static String dynamicFallback(Glyph glyph) {
-        return switch (glyph) {
-            case DYNAMIC_PPP -> "ppp";
-            case DYNAMIC_PP -> "pp";
-            case DYNAMIC_P -> "p";
-            case DYNAMIC_MP -> "mp";
-            case DYNAMIC_MF -> "mf";
-            case DYNAMIC_F -> "f";
-            case DYNAMIC_FF -> "ff";
-            case DYNAMIC_FFF -> "fff";
-            case DYNAMIC_SF -> "sf";
-            case DYNAMIC_SFZ -> "sfz";
-            case DYNAMIC_FZ -> "fz";
-            case DYNAMIC_FP -> "fp";
-            case DYNAMIC_RF -> "rf";
-            case DYNAMIC_RFZ -> "rfz";
-            case DYNAMIC_NIENTE -> "n";
-            default -> "";
-        };
-    }
-
-    private static String accidentalFallback(Glyph glyph) {
-        return switch (glyph) {
-            case ACCIDENTAL_SHARP, ACCIDENTAL_DOUBLE_SHARP -> "#";
-            case ACCIDENTAL_FLAT, ACCIDENTAL_DOUBLE_FLAT -> "b";
-            case ACCIDENTAL_NATURAL -> "n";
-            default -> "";
-        };
+    private void drawOverlayAccidental(RenderSurface surface, StaffLayout staff,
+                                       GlyphPlacement notehead, Accidental accidental) {
+        double gap = staff.lineGap();
+        double x = notehead.x() - gap * 1.5;
+        double y = notehead.y();
+        Glyph accGlyph = accidentalToGlyph(accidental);
+        GlyphPlacement synthetic = new GlyphPlacement(
+                x, y, accGlyph, notehead.staffStep(), MarkingCategory.NOTE, notehead.elementRef());
+        drawGlyph(surface, staff, synthetic);
     }
 
     /**

@@ -1,29 +1,25 @@
 package com.sheetmusic4j.fxviewer;
 
-import java.util.EnumSet;
-import java.util.IdentityHashMap;
-import java.util.Optional;
-
+import com.sheetmusic4j.core.model.Accidental;
 import com.sheetmusic4j.core.model.MusicElement;
 import com.sheetmusic4j.core.model.Score;
 import com.sheetmusic4j.engraving.Engraver;
+import com.sheetmusic4j.engraving.glyph.MarkingCategory;
 import com.sheetmusic4j.engraving.layout.LayoutOptions;
 import com.sheetmusic4j.engraving.layout.LayoutResult;
-import com.sheetmusic4j.engraving.glyph.MarkingCategory;
-
 import com.sheetmusic4j.engraving.placement.BracketPlacement;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.DoubleProperty;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleDoubleProperty;
-import javafx.collections.FXCollections;
-import javafx.collections.MapChangeListener;
-import javafx.collections.ObservableMap;
-import javafx.collections.ObservableSet;
-import javafx.collections.SetChangeListener;
+import javafx.collections.*;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.layout.Region;
 import javafx.scene.paint.Color;
+
+import java.util.EnumSet;
+import java.util.IdentityHashMap;
+import java.util.Optional;
 
 /**
  * A JavaFX control that renders a {@link Score}. It engraves the score into a
@@ -83,10 +79,21 @@ public final class SheetView extends Region {
     private final ObservableMap<MusicElement, Color> noteBackgrounds =
             FXCollections.observableMap(new IdentityHashMap<>());
 
+    /**
+     * Live map of per-element accidental overlays. Independent of
+     * {@link #noteHighlights} and {@link #noteBackgrounds} - an element
+     * can carry any combination of tint, background, and accidental
+     * overlay.
+     */
+    private final ObservableMap<MusicElement, Accidental> noteAccidentals =
+            FXCollections.observableMap(new IdentityHashMap<>());
+
     private Score score;
     private LayoutResult layout;
 
-    /** Creates an empty score view at the default engraving width. */
+    /**
+     * Creates an empty score view at the default engraving width.
+     */
     public SheetView() {
         getChildren().add(canvas);
         systemWidth.addListener((obs, oldV, newV) -> rebuild());
@@ -95,8 +102,10 @@ public final class SheetView extends Region {
         bracketsVisible.addListener((obs, oldV, newV) -> repaint());
         noteHighlights.addListener((MapChangeListener<MusicElement, Color>) change -> repaint());
         noteBackgrounds.addListener((MapChangeListener<MusicElement, Color>) change -> repaint());
+        noteAccidentals.addListener((MapChangeListener<MusicElement, Accidental>) change -> repaint());
         renderer.setNoteColorProvider(this::highlightFor);
         renderer.setNoteBackgroundProvider(this::backgroundFor);
+        renderer.setNoteAccidentalProvider(this::accidentalFor);
         // Initial empty canvas at the default width; setScore replaces it.
         canvas.setWidth(systemWidth.get() * zoom.get());
         canvas.setHeight(FALLBACK_HEIGHT * zoom.get());
@@ -104,15 +113,30 @@ public final class SheetView extends Region {
         setPrefSize(canvas.getWidth(), canvas.getHeight());
     }
 
-    /** Sets the score to display and rebuilds the engraved layout. */
+    private static Optional<RenderColor> toRenderColor(Color c) {
+        if (c == null) {
+            return Optional.empty();
+        }
+        return Optional.of(new RenderColor(
+                (int) Math.round(c.getRed() * 255),
+                (int) Math.round(c.getGreen() * 255),
+                (int) Math.round(c.getBlue() * 255),
+                (int) Math.round(c.getOpacity() * 255)));
+    }
+
+    /**
+     * Returns the score currently displayed by this view, or {@code null}.
+     */
+    public Score getScore() {
+        return score;
+    }
+
+    /**
+     * Sets the score to display and rebuilds the engraved layout.
+     */
     public void setScore(Score score) {
         this.score = score;
         rebuild();
-    }
-
-    /** Returns the score currently displayed by this view, or {@code null}. */
-    public Score getScore() {
-        return score;
     }
 
     /**
@@ -137,12 +161,16 @@ public final class SheetView extends Region {
         return systemWidth;
     }
 
-    /** Returns the current system width used by the engraver. */
+    /**
+     * Returns the current system width used by the engraver.
+     */
     public double getSystemWidth() {
         return systemWidth.get();
     }
 
-    /** Updates the system width used by the engraver, if the width is positive. */
+    /**
+     * Updates the system width used by the engraver, if the width is positive.
+     */
     public void setSystemWidth(double width) {
         if (width > 0) {
             systemWidth.set(width);
@@ -157,12 +185,16 @@ public final class SheetView extends Region {
         return zoom;
     }
 
-    /** @return the current render zoom factor. */
+    /**
+     * @return the current render zoom factor.
+     */
     public double getZoom() {
         return zoom.get();
     }
 
-    /** Update the render zoom factor, if positive. */
+    /**
+     * Update the render zoom factor, if positive.
+     */
     public void setZoom(double factor) {
         if (factor > 0) {
             zoom.set(factor);
@@ -191,12 +223,16 @@ public final class SheetView extends Region {
         return bracketsVisible;
     }
 
-    /** @return {@code true} when brackets are currently drawn. */
+    /**
+     * @return {@code true} when brackets are currently drawn.
+     */
     public boolean isBracketsVisible() {
         return bracketsVisible.get();
     }
 
-    /** Update the bracket visibility flag, triggering a repaint. */
+    /**
+     * Update the bracket visibility flag, triggering a repaint.
+     */
     public void setBracketsVisible(boolean visible) {
         bracketsVisible.set(visible);
     }
@@ -232,6 +268,37 @@ public final class SheetView extends Region {
     }
 
     /**
+     * Live-observable per-element accidental overlay map. Adding a
+     * {@code (element, Accidental)} pair draws the corresponding SMuFL
+     * accidental glyph to the immediate left of that element's notehead -
+     * regardless of whether the element itself carries a
+     * {@link com.sheetmusic4j.core.model.Note#displayedAccidental()}.
+     * Removing the entry clears it. Mutations trigger a {@link #repaint()} -
+     * no re-engrave.
+     *
+     * <p>Intended for dynamic runtime overlays such as playback / live-input
+     * views that need to signal "the user just played a sharp of this
+     * natural note" without altering the engraved score. Independent of
+     * both {@link #noteHighlights()} and {@link #noteBackgrounds()}: an
+     * element can carry any combination of tint, background, and
+     * accidental overlay.
+     *
+     * <p>When the source note already carries an engraved accidental
+     * (via {@code <accidental>} on the note's MusicXML, i.e.
+     * {@link com.sheetmusic4j.core.model.Note#displayedAccidental()} is
+     * present), the overlay value <em>replaces</em> the engraved glyph
+     * in-place for as long as the entry is in the map. Removing the
+     * entry restores the original engraved accidental. This lets callers
+     * momentarily flash e.g. {@link Accidental#DOUBLE_SHARP} on a note
+     * that natively displays a simple sharp, without editing the model.
+     *
+     * @return the observable map (never {@code null})
+     */
+    public ObservableMap<MusicElement, Accidental> noteAccidentals() {
+        return noteAccidentals;
+    }
+
+    /**
      * Look up the highlight colour for the given source element, if any.
      * Wrapped as a {@link RenderColor} so the surface-agnostic
      * {@link ScorePainter} can apply it without dragging in JavaFX.
@@ -249,15 +316,11 @@ public final class SheetView extends Region {
         return toRenderColor(noteBackgrounds.get(element));
     }
 
-    private static Optional<RenderColor> toRenderColor(Color c) {
-        if (c == null) {
-            return Optional.empty();
-        }
-        return Optional.of(new RenderColor(
-                (int) Math.round(c.getRed() * 255),
-                (int) Math.round(c.getGreen() * 255),
-                (int) Math.round(c.getBlue() * 255),
-                (int) Math.round(c.getOpacity() * 255)));
+    /**
+     * Look up the accidental overlay for the given source element, if any.
+     */
+    private Optional<Accidental> accidentalFor(MusicElement element) {
+        return Optional.ofNullable(noteAccidentals.get(element));
     }
 
     /**
@@ -317,16 +380,6 @@ public final class SheetView extends Region {
     }
 
     @Override
-    protected double computePrefWidth(double height) {
-        return canvas.getWidth();
-    }
-
-    @Override
-    protected double computePrefHeight(double width) {
-        return canvas.getHeight();
-    }
-
-    @Override
     protected double computeMinWidth(double height) {
         return Math.min(200, canvas.getWidth());
     }
@@ -334,6 +387,16 @@ public final class SheetView extends Region {
     @Override
     protected double computeMinHeight(double width) {
         return Math.min(120, canvas.getHeight());
+    }
+
+    @Override
+    protected double computePrefWidth(double height) {
+        return canvas.getWidth();
+    }
+
+    @Override
+    protected double computePrefHeight(double width) {
+        return canvas.getHeight();
     }
 
     @Override

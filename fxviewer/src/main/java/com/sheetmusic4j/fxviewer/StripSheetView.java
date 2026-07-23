@@ -1,21 +1,13 @@
 package com.sheetmusic4j.fxviewer;
 
-import java.util.IdentityHashMap;
-import java.util.Optional;
-
+import com.sheetmusic4j.core.model.Accidental;
 import com.sheetmusic4j.core.model.MusicElement;
 import com.sheetmusic4j.core.model.Score;
 import com.sheetmusic4j.engraving.Engraver;
 import com.sheetmusic4j.engraving.layout.LayoutMode;
 import com.sheetmusic4j.engraving.layout.LayoutOptions;
 import com.sheetmusic4j.engraving.layout.LayoutResult;
-
-import javafx.beans.property.BooleanProperty;
-import javafx.beans.property.DoubleProperty;
-import javafx.beans.property.ObjectProperty;
-import javafx.beans.property.SimpleBooleanProperty;
-import javafx.beans.property.SimpleDoubleProperty;
-import javafx.beans.property.SimpleObjectProperty;
+import javafx.beans.property.*;
 import javafx.collections.FXCollections;
 import javafx.collections.MapChangeListener;
 import javafx.collections.ObservableMap;
@@ -26,6 +18,9 @@ import javafx.scene.layout.Region;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Line;
 import javafx.scene.shape.Rectangle;
+
+import java.util.IdentityHashMap;
+import java.util.Optional;
 
 /**
  * One-line "strip" score view designed for play-along use. The score is
@@ -72,10 +67,15 @@ public final class StripSheetView extends Region {
     private final ObservableMap<MusicElement, Color> noteBackgrounds =
             FXCollections.observableMap(new IdentityHashMap<>());
 
+    private final ObservableMap<MusicElement, Accidental> noteAccidentals =
+            FXCollections.observableMap(new IdentityHashMap<>());
+
     private Score score;
     private LayoutResult layout;
 
-    /** Creates an empty strip view. */
+    /**
+     * Creates an empty strip view.
+     */
     public StripSheetView() {
         setPadding(new Insets(4));
         getChildren().addAll(canvas, cursor);
@@ -85,12 +85,14 @@ public final class StripSheetView extends Region {
         cursor.visibleProperty().bind(cursorVisible);
         renderer.setNoteColorProvider(this::highlightFor);
         renderer.setNoteBackgroundProvider(this::backgroundFor);
+        renderer.setNoteAccidentalProvider(this::accidentalFor);
 
         cursorTime.addListener((obs, o, n) -> updateCursor());
         cursorScreenPosition.addListener((obs, o, n) -> updateCursor());
         zoom.addListener((obs, o, n) -> rebuild());
         noteHighlights.addListener((MapChangeListener<MusicElement, Color>) c -> repaint());
         noteBackgrounds.addListener((MapChangeListener<MusicElement, Color>) c -> repaint());
+        noteAccidentals.addListener((MapChangeListener<MusicElement, Accidental>) c -> repaint());
 
         widthProperty().addListener((obs, o, n) -> {
             clip.setWidth(n.doubleValue());
@@ -106,6 +108,34 @@ public final class StripSheetView extends Region {
         setPrefSize(400, FALLBACK_HEIGHT);
     }
 
+    private static Optional<RenderColor> toRenderColor(Color c) {
+        if (c == null) {
+            return Optional.empty();
+        }
+        return Optional.of(new RenderColor(
+                (int) Math.round(c.getRed() * 255),
+                (int) Math.round(c.getGreen() * 255),
+                (int) Math.round(c.getBlue() * 255),
+                (int) Math.round(c.getOpacity() * 255)));
+    }
+
+    private static double clamp01(double v) {
+        if (v < 0) {
+            return 0;
+        }
+        if (v > 1) {
+            return 1;
+        }
+        return v;
+    }
+
+    /**
+     * @return the currently displayed score, or {@code null}.
+     */
+    public Score getScore() {
+        return score;
+    }
+
     /**
      * Set the score to display. The score is engraved in
      * {@link LayoutMode#STRIP} mode; other options are taken from
@@ -114,11 +144,6 @@ public final class StripSheetView extends Region {
     public void setScore(Score score) {
         this.score = score;
         rebuild();
-    }
-
-    /** @return the currently displayed score, or {@code null}. */
-    public Score getScore() {
-        return score;
     }
 
     /**
@@ -163,7 +188,9 @@ public final class StripSheetView extends Region {
         cursorScreenPosition.set(fraction);
     }
 
-    /** Whether the cursor line is drawn. */
+    /**
+     * Whether the cursor line is drawn.
+     */
     public BooleanProperty cursorVisibleProperty() {
         return cursorVisible;
     }
@@ -176,7 +203,9 @@ public final class StripSheetView extends Region {
         cursorVisible.set(visible);
     }
 
-    /** Colour of the cursor line. */
+    /**
+     * Colour of the cursor line.
+     */
     public ObjectProperty<Color> cursorColorProperty() {
         return cursorColor;
     }
@@ -218,7 +247,25 @@ public final class StripSheetView extends Region {
         return noteBackgrounds;
     }
 
-    /** Render zoom factor (positive). Values above 1 enlarge the score. */
+    /**
+     * Live-observable per-element accidental overlays. Adding a
+     * {@code (element, Accidental)} pair draws the corresponding SMuFL
+     * accidental glyph to the immediate left of that element's notehead;
+     * removing the entry clears it. Independent of
+     * {@link #noteHighlights()} and {@link #noteBackgrounds()}; mutations
+     * only trigger a canvas repaint - no re-engrave. When the source note
+     * already carries an engraved accidental, the overlay value replaces
+     * it in-place for as long as the entry is present.
+     *
+     * @return the observable map (never {@code null})
+     */
+    public ObservableMap<MusicElement, Accidental> noteAccidentals() {
+        return noteAccidentals;
+    }
+
+    /**
+     * Render zoom factor (positive). Values above 1 enlarge the score.
+     */
     public DoubleProperty zoomProperty() {
         return zoom;
     }
@@ -241,15 +288,8 @@ public final class StripSheetView extends Region {
         return toRenderColor(noteBackgrounds.get(element));
     }
 
-    private static Optional<RenderColor> toRenderColor(Color c) {
-        if (c == null) {
-            return Optional.empty();
-        }
-        return Optional.of(new RenderColor(
-                (int) Math.round(c.getRed() * 255),
-                (int) Math.round(c.getGreen() * 255),
-                (int) Math.round(c.getBlue() * 255),
-                (int) Math.round(c.getOpacity() * 255)));
+    private Optional<Accidental> accidentalFor(MusicElement element) {
+        return Optional.ofNullable(noteAccidentals.get(element));
     }
 
     private void rebuild() {
@@ -311,15 +351,5 @@ public final class StripSheetView extends Region {
     protected void layoutChildren() {
         // Cursor is positioned via its own start/end coords, and canvas via
         // its layoutX property. Nothing to lay out here.
-    }
-
-    private static double clamp01(double v) {
-        if (v < 0) {
-            return 0;
-        }
-        if (v > 1) {
-            return 1;
-        }
-        return v;
     }
 }
