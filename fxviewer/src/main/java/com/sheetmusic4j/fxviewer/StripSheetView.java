@@ -69,6 +69,9 @@ public final class StripSheetView extends Region {
     private final ObservableMap<MusicElement, Color> noteHighlights =
             FXCollections.observableMap(new IdentityHashMap<>());
 
+    private final ObservableMap<MusicElement, Color> noteBackgrounds =
+            FXCollections.observableMap(new IdentityHashMap<>());
+
     private Score score;
     private LayoutResult layout;
 
@@ -81,11 +84,13 @@ public final class StripSheetView extends Region {
         cursor.strokeProperty().bind(cursorColor);
         cursor.visibleProperty().bind(cursorVisible);
         renderer.setNoteColorProvider(this::highlightFor);
+        renderer.setNoteBackgroundProvider(this::backgroundFor);
 
         cursorTime.addListener((obs, o, n) -> updateCursor());
         cursorScreenPosition.addListener((obs, o, n) -> updateCursor());
         zoom.addListener((obs, o, n) -> rebuild());
         noteHighlights.addListener((MapChangeListener<MusicElement, Color>) c -> repaint());
+        noteBackgrounds.addListener((MapChangeListener<MusicElement, Color>) c -> repaint());
 
         widthProperty().addListener((obs, o, n) -> {
             clip.setWidth(n.doubleValue());
@@ -200,6 +205,19 @@ public final class StripSheetView extends Region {
         return noteHighlights;
     }
 
+    /**
+     * Live-observable per-element <em>background</em> colours. Adding a
+     * {@code (element, colour)} pair draws a rounded, semi-transparent
+     * rectangle behind that element's notehead for a strong "played right
+     * now" visual pop. Independent of {@link #noteHighlights()}.
+     * Mutations only trigger a canvas repaint - no re-engrave.
+     *
+     * @return the observable map (never {@code null})
+     */
+    public ObservableMap<MusicElement, Color> noteBackgrounds() {
+        return noteBackgrounds;
+    }
+
     /** Render zoom factor (positive). Values above 1 enlarge the score. */
     public DoubleProperty zoomProperty() {
         return zoom;
@@ -216,14 +234,22 @@ public final class StripSheetView extends Region {
     }
 
     private Optional<RenderColor> highlightFor(MusicElement element) {
-        Color c = noteHighlights.get(element);
+        return toRenderColor(noteHighlights.get(element));
+    }
+
+    private Optional<RenderColor> backgroundFor(MusicElement element) {
+        return toRenderColor(noteBackgrounds.get(element));
+    }
+
+    private static Optional<RenderColor> toRenderColor(Color c) {
         if (c == null) {
             return Optional.empty();
         }
         return Optional.of(new RenderColor(
                 (int) Math.round(c.getRed() * 255),
                 (int) Math.round(c.getGreen() * 255),
-                (int) Math.round(c.getBlue() * 255)));
+                (int) Math.round(c.getBlue() * 255),
+                (int) Math.round(c.getOpacity() * 255)));
     }
 
     private void rebuild() {

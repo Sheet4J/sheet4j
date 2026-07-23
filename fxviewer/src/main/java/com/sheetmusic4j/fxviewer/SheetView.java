@@ -75,6 +75,14 @@ public final class SheetView extends Region {
     private final ObservableMap<MusicElement, Color> noteHighlights =
             FXCollections.observableMap(new IdentityHashMap<>());
 
+    /**
+     * Live map of per-element background colours. Independent of
+     * {@link #noteHighlights} - an element can carry a tint, a
+     * background, both, or neither.
+     */
+    private final ObservableMap<MusicElement, Color> noteBackgrounds =
+            FXCollections.observableMap(new IdentityHashMap<>());
+
     private Score score;
     private LayoutResult layout;
 
@@ -86,7 +94,9 @@ public final class SheetView extends Region {
         hiddenTextCategories.addListener((SetChangeListener<MarkingCategory>) change -> repaint());
         bracketsVisible.addListener((obs, oldV, newV) -> repaint());
         noteHighlights.addListener((MapChangeListener<MusicElement, Color>) change -> repaint());
+        noteBackgrounds.addListener((MapChangeListener<MusicElement, Color>) change -> repaint());
         renderer.setNoteColorProvider(this::highlightFor);
+        renderer.setNoteBackgroundProvider(this::backgroundFor);
         // Initial empty canvas at the default width; setScore replaces it.
         canvas.setWidth(systemWidth.get() * zoom.get());
         canvas.setHeight(FALLBACK_HEIGHT * zoom.get());
@@ -205,19 +215,49 @@ public final class SheetView extends Region {
     }
 
     /**
+     * Live-observable per-element <em>background</em> colour map. Adding a
+     * {@code (element, colour)} pair draws a rounded, semi-transparent
+     * rectangle behind that element's notehead - including the accidental
+     * slot and augmentation-dot column - for a strong "played right now"
+     * visual pop. Removing the entry clears the background. Mutations
+     * trigger a {@link #repaint()} - no re-engrave.
+     *
+     * <p>Independent of {@link #noteHighlights()}: an element can carry a
+     * tint, a background, both, or neither.
+     *
+     * @return the observable map (never {@code null})
+     */
+    public ObservableMap<MusicElement, Color> noteBackgrounds() {
+        return noteBackgrounds;
+    }
+
+    /**
      * Look up the highlight colour for the given source element, if any.
      * Wrapped as a {@link RenderColor} so the surface-agnostic
      * {@link ScorePainter} can apply it without dragging in JavaFX.
      */
     private Optional<RenderColor> highlightFor(MusicElement element) {
-        Color c = noteHighlights.get(element);
+        return toRenderColor(noteHighlights.get(element));
+    }
+
+    /**
+     * Look up the background colour for the given source element, if any.
+     * Honours the JavaFX colour's opacity so callers can drive
+     * semi-transparent highlights straight from a {@link Color} literal.
+     */
+    private Optional<RenderColor> backgroundFor(MusicElement element) {
+        return toRenderColor(noteBackgrounds.get(element));
+    }
+
+    private static Optional<RenderColor> toRenderColor(Color c) {
         if (c == null) {
             return Optional.empty();
         }
         return Optional.of(new RenderColor(
                 (int) Math.round(c.getRed() * 255),
                 (int) Math.round(c.getGreen() * 255),
-                (int) Math.round(c.getBlue() * 255)));
+                (int) Math.round(c.getBlue() * 255),
+                (int) Math.round(c.getOpacity() * 255)));
     }
 
     /**

@@ -27,7 +27,7 @@ public final class FxRenderSurface implements RenderSurface {
     }
 
     private static Color toColor(RenderColor color) {
-        return Color.rgb(color.red(), color.green(), color.blue());
+        return Color.rgb(color.red(), color.green(), color.blue(), color.alpha() / 255.0);
     }
 
     @Override
@@ -68,6 +68,15 @@ public final class FxRenderSurface implements RenderSurface {
     @Override
     public void strokeRect(double x, double y, double width, double height) {
         gc.strokeRect(x, y, width, height);
+    }
+
+    @Override
+    public void fillRoundedRect(double x, double y, double width, double height,
+                                double arcWidth, double arcHeight, RenderColor color) {
+        Color previous = (Color) gc.getFill();
+        gc.setFill(toColor(color));
+        gc.fillRoundRect(x, y, width, height, arcWidth, arcHeight);
+        gc.setFill(previous);
     }
 
     @Override

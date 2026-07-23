@@ -3,6 +3,9 @@ package com.sheetmusic4j.engraving.layout;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.sheetmusic4j.engraving.placement.BeamPlacement;
+import com.sheetmusic4j.engraving.placement.GlyphPlacement;
+import com.sheetmusic4j.engraving.placement.StemPlacement;
 import com.sheetmusic4j.engraving.placement.TextPlacement;
 
 /**
@@ -107,6 +110,73 @@ public record LayoutResult(List<SystemLayout> systems, List<TextPlacement> texts
         // Fall through: past the end of the last measure with time info.
         MeasureLayout last = primary.get(primary.size() - 1);
         return last.right();
+    }
+
+    /**
+     * The maximum y coordinate reached by any glyph, stem, beam or note
+     * anchor in the layout, i.e. the true bottom edge of the drawn
+     * content. Notes with several ledger lines below the last staff line
+     * (e.g. C2 on a bass staff) can extend below the pure staff area, and
+     * this method reports how far. Callers that translate the drawing
+     * origin (rather than relying on the pre-expanded
+     * {@link #height()}) can use this to size their surface exactly.
+     */
+    public double contentBottom() {
+        double bottom = 0.0;
+        for (SystemLayout system : systems) {
+            for (StaffLayout staff : system.staves()) {
+                double gap = staff.lineGap();
+                for (GlyphPlacement gp : staff.glyphs()) {
+                    bottom = Math.max(bottom, gp.y() + gap);
+                }
+                for (StemPlacement sp : staff.stems()) {
+                    bottom = Math.max(bottom, Math.max(sp.y1(), sp.y2()));
+                }
+                for (BeamPlacement bp : staff.beams()) {
+                    bottom = Math.max(bottom, Math.max(bp.y1(), bp.y2()));
+                }
+            }
+        }
+        for (NoteAnchor a : noteAnchors) {
+            bottom = Math.max(bottom, a.y() + a.height() / 2.0);
+        }
+        return bottom;
+    }
+
+    /**
+     * The minimum y coordinate reached by any glyph, stem, beam or note
+     * anchor. Negative when the drawn content extends above the layout's
+     * nominal top edge (e.g. high ledger lines above a treble staff);
+     * {@code 0} otherwise. Renderers that want to translate the drawing
+     * origin instead of relying on {@link #height()}'s expansion can use
+     * this alongside {@link #contentBottom()} to compute the exact drawn
+     * bounds.
+     */
+    public double contentTop() {
+        double top = Double.POSITIVE_INFINITY;
+        boolean any = false;
+        for (SystemLayout system : systems) {
+            for (StaffLayout staff : system.staves()) {
+                double gap = staff.lineGap();
+                for (GlyphPlacement gp : staff.glyphs()) {
+                    top = Math.min(top, gp.y() - gap);
+                    any = true;
+                }
+                for (StemPlacement sp : staff.stems()) {
+                    top = Math.min(top, Math.min(sp.y1(), sp.y2()));
+                    any = true;
+                }
+                for (BeamPlacement bp : staff.beams()) {
+                    top = Math.min(top, Math.min(bp.y1(), bp.y2()));
+                    any = true;
+                }
+            }
+        }
+        for (NoteAnchor a : noteAnchors) {
+            top = Math.min(top, a.y() - a.height() / 2.0);
+            any = true;
+        }
+        return any ? top : 0.0;
     }
 
     /**

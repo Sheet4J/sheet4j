@@ -34,7 +34,7 @@ public final class AwtRenderSurface implements RenderSurface {
     }
 
     private static Color toAwt(RenderColor color) {
-        return new Color(color.red(), color.green(), color.blue());
+        return new Color(color.red(), color.green(), color.blue(), color.alpha());
     }
 
     @Override
@@ -85,6 +85,17 @@ public final class AwtRenderSurface implements RenderSurface {
         g.setColor(stroke);
         g.drawRect((int) Math.round(x), (int) Math.round(y),
                 (int) Math.round(width), (int) Math.round(height));
+    }
+
+    @Override
+    public void fillRoundedRect(double x, double y, double width, double height,
+                                double arcWidth, double arcHeight, RenderColor color) {
+        Color previous = g.getColor();
+        g.setColor(toAwt(color));
+        g.fillRoundRect((int) Math.round(x), (int) Math.round(y),
+                (int) Math.round(width), (int) Math.round(height),
+                (int) Math.round(arcWidth), (int) Math.round(arcHeight));
+        g.setColor(previous);
     }
 
     @Override

@@ -49,6 +49,33 @@ public interface RenderSurface {
         strokeLine(x, y + height, x, y);
     }
 
+    /**
+     * Fills an axis-aligned rectangle with rounded corners. Used by
+     * {@link ScorePainter} to draw semi-transparent note-background
+     * highlights behind noteheads: unlike {@link #fillRect}, the fill
+     * colour is passed as a parameter (rather than left as ambient surface
+     * state) so backends can honour its {@link RenderColor#alpha()} channel
+     * without disturbing the caller's active fill.
+     *
+     * <p>The default implementation ignores the corner radii and
+     * approximates with a plain rectangle drawn in the current fill
+     * colour. Backends that support rounded rectangles (JavaFX / AWT)
+     * should override.
+     *
+     * @param x         top-left x
+     * @param y         top-left y
+     * @param width     width of the rectangle
+     * @param height    height of the rectangle
+     * @param arcWidth  horizontal diameter of the corner arc
+     * @param arcHeight vertical diameter of the corner arc
+     * @param color     fill colour, potentially semi-transparent
+     */
+    default void fillRoundedRect(double x, double y, double width, double height,
+                                 double arcWidth, double arcHeight, RenderColor color) {
+        setFill(color);
+        fillRect(x, y, width, height);
+    }
+
     /** Draws text with the current stroke/fill settings. */
     void strokeText(String text, double x, double y);
 

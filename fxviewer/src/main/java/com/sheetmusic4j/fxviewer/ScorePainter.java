@@ -14,6 +14,7 @@ import com.sheetmusic4j.engraving.placement.HairpinPlacement;
 import com.sheetmusic4j.engraving.layout.LayoutResult;
 import com.sheetmusic4j.engraving.glyph.MarkingCategory;
 import com.sheetmusic4j.engraving.layout.MeasureLayout;
+import com.sheetmusic4j.engraving.layout.NoteAnchor;
 import com.sheetmusic4j.engraving.placement.SlurPlacement;
 import com.sheetmusic4j.engraving.placement.StemPlacement;
 import com.sheetmusic4j.engraving.layout.StaffLayout;
@@ -41,6 +42,23 @@ public final class ScorePainter {
     private static final int STAFF_LINES = 5;
     private static final double STEM_LENGTH_GAPS = 3.5;
 
+    /**
+     * Horizontal padding to the left of a note-background rectangle,
+     * expressed in staff-line gaps. Wider than the right padding so the
+     * rectangle covers the accidental slot that sits to the left of the
+     * notehead.
+     */
+    private static final double BG_PAD_LEFT_GAPS = 2.2;
+
+    /** Horizontal padding to the right of a note-background rectangle. */
+    private static final double BG_PAD_RIGHT_GAPS = 0.6;
+
+    /** Vertical padding above/below a note-background rectangle. */
+    private static final double BG_PAD_Y_GAPS = 0.4;
+
+    /** Corner arc radius for a note-background rectangle, in staff-line gaps. */
+    private static final double BG_ARC_GAPS = 1.0;
+
     private final EnumSet<MarkingCategory> hiddenCategories =
             EnumSet.noneOf(MarkingCategory.class);
 
@@ -54,6 +72,15 @@ public final class ScorePainter {
      * one unit. {@code null} disables the mechanism.
      */
     private Function<MusicElement, Optional<RenderColor>> noteColorProvider;
+
+    /**
+     * Optional per-element background provider. When set, the returned
+     * colour (if any) is drawn as a rounded, potentially semi-transparent
+     * rectangle behind that element's notehead - covering the accidental
+     * slot and augmentation dot column - before any staff or glyph content
+     * is drawn. {@code null} disables the mechanism.
+     */
+    private Function<MusicElement, Optional<RenderColor>> noteBackgroundProvider;
 
     /** Creates a painter for rendering a layout onto any {@link RenderSurface}. */
     public ScorePainter() {
@@ -91,6 +118,23 @@ public final class ScorePainter {
     }
 
     /**
+     * Install a per-element background provider used to draw a rounded,
+     * semi-transparent rectangle behind the target element's notehead
+     * before any staff or glyph content is drawn. The provider is queried
+     * once per {@link NoteAnchor} in the layout; when it returns a
+     * non-empty {@link Optional} a rounded rectangle in that colour is
+     * drawn behind the notehead (including the accidental slot).
+     *
+     * <p>Independent of {@link #setNoteColorProvider}: an element can
+     * carry a tint, a background, both, or neither.
+     *
+     * @param provider the provider, or {@code null} to disable backgrounds
+     */
+    public void setNoteBackgroundProvider(Function<MusicElement, Optional<RenderColor>> provider) {
+        this.noteBackgroundProvider = provider;
+    }
+
+    /**
      * Look up the highlight colour for the given source element, if any.
      * Returns {@code null} when no provider is installed, no element is
      * associated, or the provider returned an empty optional.
@@ -100,6 +144,18 @@ public final class ScorePainter {
             return null;
         }
         Optional<RenderColor> c = noteColorProvider.apply(element);
+        return c == null ? null : c.orElse(null);
+    }
+
+    /**
+     * Look up the background colour for the given source element, if any.
+     * Same semantics as {@link #colorFor}.
+     */
+    private RenderColor backgroundFor(MusicElement element) {
+        if (element == null || noteBackgroundProvider == null) {
+            return null;
+        }
+        Optional<RenderColor> c = noteBackgroundProvider.apply(element);
         return c == null ? null : c.orElse(null);
     }
 
@@ -139,6 +195,11 @@ public final class ScorePainter {
         surface.setFill(RenderColor.BLACK);
         surface.setLineWidth(1.0);
 
+        // Note-background highlights are drawn first so staff lines and
+        // noteheads sit on top of them (they read as a highlight behind
+        // the notehead, not a foreground overlay covering it).
+        drawNoteBackgrounds(surface, layout);
+
         // Hidden text still consumes vertical space at the engraver —
         // reclaiming that gap is a follow-up task.
         for (TextPlacement text : layout.texts()) {
@@ -168,6 +229,58 @@ public final class ScorePainter {
         */
         boolean isHidden(MarkingCategory category) {
         return hiddenCategories.contains(category);
+        }
+
+        /**
+        * Draw a rounded, semi-transparent rectangle behind every element that
+        * carries a background colour. Iterates {@link LayoutResult#noteAnchors()}
+        * once; anchors whose element resolves to {@code null} in the
+        * background provider are skipped. No-op when no background provider
+        * is installed.
+        *
+        * <p>The rectangle is sized to cover the notehead plus a wider slot on
+        * the left (for the accidental) and a narrower one on the right (for
+        * augmentation dots). Padding scales with the layout's staff-line gap
+        * so backgrounds keep their proportion at any zoom level.
+        */
+        private void drawNoteBackgrounds(RenderSurface surface, LayoutResult layout) {
+        if (noteBackgroundProvider == null) {
+            return;
+        }
+        double gap = referenceLineGap(layout);
+        double padLeft = gap * BG_PAD_LEFT_GAPS;
+        double padRight = gap * BG_PAD_RIGHT_GAPS;
+        double padY = gap * BG_PAD_Y_GAPS;
+        double arc = gap * BG_ARC_GAPS;
+        // Cap the rectangle height at a reasonable multiple of the gap so
+        // a chord anchor whose bounding box also includes its long stem
+        // doesn't produce a hugely tall highlight rectangle.
+        double maxBgHeight = gap * 4.5;
+        for (NoteAnchor anchor : layout.noteAnchors()) {
+            RenderColor bg = backgroundFor(anchor.elementRef());
+            if (bg == null) {
+                continue;
+            }
+            double rectHeight = Math.min(anchor.height(), maxBgHeight) + padY * 2;
+            double rectWidth = anchor.width() + padLeft + padRight;
+            double rectX = anchor.x() - anchor.width() / 2.0 - padLeft + padRight;
+            double rectY = anchor.y() - rectHeight / 2.0;
+            surface.fillRoundedRect(rectX, rectY, rectWidth, rectHeight, arc, arc, bg);
+        }
+        }
+
+        /**
+        * Reference staff-line gap used to size layout-wide highlights. Uses
+        * the first staff's gap when available; falls back to a sensible
+        * constant when the layout carries no staves (e.g. an empty score).
+        */
+        private static double referenceLineGap(LayoutResult layout) {
+        for (SystemLayout system : layout.systems()) {
+            for (StaffLayout staff : system.staves()) {
+                return staff.lineGap();
+            }
+        }
+        return 10.0;
         }
 
     /**

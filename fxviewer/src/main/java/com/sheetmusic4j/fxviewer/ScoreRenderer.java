@@ -73,4 +73,12 @@ public final class ScoreRenderer {
     public void setNoteColorProvider(Function<MusicElement, Optional<RenderColor>> provider) {
         painter.setNoteColorProvider(provider);
     }
+
+    /**
+     * Install a per-element background provider on the underlying painter.
+     * See {@link ScorePainter#setNoteBackgroundProvider(Function)}.
+     */
+    public void setNoteBackgroundProvider(Function<MusicElement, Optional<RenderColor>> provider) {
+        painter.setNoteBackgroundProvider(provider);
+    }
     }

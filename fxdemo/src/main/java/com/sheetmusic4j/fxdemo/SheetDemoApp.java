@@ -2,16 +2,21 @@ package com.sheetmusic4j.fxdemo;
 
 import com.dlsc.pdfviewfx.PDFView;
 import com.sheetmusic4j.core.io.ScoreFile;
+import com.sheetmusic4j.core.model.MusicElement;
 import com.sheetmusic4j.core.model.Score;
 import com.sheetmusic4j.engraving.Engraver;
 import com.sheetmusic4j.engraving.glyph.MarkingCategory;
 import com.sheetmusic4j.engraving.layout.LayoutOptions;
 import com.sheetmusic4j.engraving.layout.LayoutResult;
+import com.sheetmusic4j.engraving.layout.NoteAnchor;
 import com.sheetmusic4j.fxdemo.reference.DiagnosticComparator;
 import com.sheetmusic4j.fxdemo.reference.DiffReportWriter;
 import com.sheetmusic4j.fxdemo.reference.ImageStack;
 import com.sheetmusic4j.fxdemo.reference.PdfRasterizer;
 import com.sheetmusic4j.fxviewer.SheetView;
+import javafx.animation.Animation;
+import javafx.animation.KeyFrame;
+import javafx.animation.Timeline;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.concurrent.Task;
@@ -34,6 +39,7 @@ import javafx.scene.layout.Priority;
 import javafx.scene.web.WebView;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
+import javafx.util.Duration;
 
 import java.awt.*;
 import java.awt.image.BufferedImage;
@@ -82,6 +88,8 @@ public final class SheetDemoApp extends Application {
     private Stage stage;
     private Path currentFile;
     private Score currentScore;
+    private Timeline playbackSimulation;
+    private int simulationIndex;
 
     private static LayoutOptions layoutOptions() {
         LayoutOptions defaults = LayoutOptions.defaults();
@@ -160,6 +168,10 @@ public final class SheetDemoApp extends Application {
         showBrackets.setSelected(true);
         showBrackets.setOnAction(e -> sheetView.setBracketsVisible(showBrackets.isSelected()));
         viewMenu.getItems().add(showBrackets);
+
+        CheckMenuItem simulatePlayback = new CheckMenuItem("Simulate playback (tint + background)");
+        simulatePlayback.setOnAction(e -> togglePlaybackSimulation(simulatePlayback.isSelected()));
+        viewMenu.getItems().add(simulatePlayback);
 
         viewMenu.getItems().add(new SeparatorMenuItem());
         MenuItem zoomIn = new MenuItem("Zoom In");
@@ -317,6 +329,7 @@ public final class SheetDemoApp extends Application {
 
     private void openFile(Path path) {
         try {
+            stopPlaybackSimulation();
             Score score = ScoreFile.load(path);
             currentFile = path;
             currentScore = score;
@@ -487,6 +500,7 @@ public final class SheetDemoApp extends Application {
     }
 
     private void clear() {
+        stopPlaybackSimulation();
         currentFile = null;
         currentScore = null;
         sheetView.setScore(null);
@@ -495,6 +509,61 @@ public final class SheetDemoApp extends Application {
         stage.setTitle("Sheetmusic4J Demo");
         statusLabel.setText("Closed.");
         generateReferenceButton.setDisable(true);
+    }
+
+    /**
+     * Cheap playback simulator: iterates through the current layout's note
+     * anchors at a fixed cadence and highlights each one - both a yellow
+     * translucent background (via {@link SheetView#noteBackgrounds()}) and
+     * a red foreground tint (via {@link SheetView#noteHighlights()}) - so
+     * the two-map API is exercised in the demo.
+     */
+    private void togglePlaybackSimulation(boolean on) {
+        if (on) {
+            startPlaybackSimulation();
+        } else {
+            stopPlaybackSimulation();
+        }
+    }
+
+    private void startPlaybackSimulation() {
+        stopPlaybackSimulation();
+        if (currentScore == null) {
+            statusLabel.setText("Load a score first to simulate playback.");
+            return;
+        }
+        LayoutResult layout = sheetView.getLayout();
+        if (layout == null || layout.noteAnchors().isEmpty()) {
+            statusLabel.setText("Current score has no note anchors to highlight.");
+            return;
+        }
+        final List<NoteAnchor> anchors = layout.noteAnchors();
+        simulationIndex = 0;
+        final javafx.scene.paint.Color highlightTint = javafx.scene.paint.Color.CRIMSON;
+        final javafx.scene.paint.Color highlightBg = javafx.scene.paint.Color.color(1.0, 0.92, 0.23, 0.5);
+        playbackSimulation = new Timeline(new KeyFrame(Duration.millis(350), evt -> {
+            MusicElement previous = simulationIndex > 0
+                    ? anchors.get((simulationIndex - 1) % anchors.size()).elementRef()
+                    : anchors.get(anchors.size() - 1).elementRef();
+            sheetView.noteHighlights().remove(previous);
+            sheetView.noteBackgrounds().remove(previous);
+            MusicElement current = anchors.get(simulationIndex % anchors.size()).elementRef();
+            sheetView.noteHighlights().put(current, highlightTint);
+            sheetView.noteBackgrounds().put(current, highlightBg);
+            simulationIndex++;
+        }));
+        playbackSimulation.setCycleCount(Animation.INDEFINITE);
+        playbackSimulation.play();
+        statusLabel.setText("Simulating playback: highlighting notes at 350ms cadence.");
+    }
+
+    private void stopPlaybackSimulation() {
+        if (playbackSimulation != null) {
+            playbackSimulation.stop();
+            playbackSimulation = null;
+        }
+        sheetView.noteHighlights().clear();
+        sheetView.noteBackgrounds().clear();
     }
 
     private void updateDebug(Score score, Optional<Path> pdf) {
