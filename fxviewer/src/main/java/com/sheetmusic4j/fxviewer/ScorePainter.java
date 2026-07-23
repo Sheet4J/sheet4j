@@ -1,8 +1,11 @@
 package com.sheetmusic4j.fxviewer;
 
 import java.util.EnumSet;
+import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 
+import com.sheetmusic4j.core.model.MusicElement;
 import com.sheetmusic4j.engraving.placement.BeamPlacement;
 import com.sheetmusic4j.engraving.placement.BracketPlacement;
 import com.sheetmusic4j.engraving.glyph.Glyph;
@@ -43,6 +46,15 @@ public final class ScorePainter {
 
     private boolean bracketsVisible = true;
 
+    /**
+     * Optional per-element colour override. When set, the returned colour
+     * (if any) is applied to every glyph/stem whose
+     * {@link GlyphPlacement#elementRef()} equals the queried element,
+     * covering notehead + stem + flag + accidental + augmentation dots as
+     * one unit. {@code null} disables the mechanism.
+     */
+    private Function<MusicElement, Optional<RenderColor>> noteColorProvider;
+
     /** Creates a painter for rendering a layout onto any {@link RenderSurface}. */
     public ScorePainter() {
     }
@@ -63,6 +75,32 @@ public final class ScorePainter {
     /** Whether {@link BracketPlacement bracket placements} are drawn. */
     public boolean isBracketsVisible() {
         return bracketsVisible;
+    }
+
+    /**
+     * Install a per-element colour provider used to tint highlighted
+     * notes. The provider is queried once per element that has a linked
+     * {@link MusicElement} on its glyph placement; when it returns a
+     * non-empty {@link Optional} the returned colour replaces the default
+     * fill/stroke for that element's glyphs and stem.
+     *
+     * @param provider the provider, or {@code null} to disable highlighting
+     */
+    public void setNoteColorProvider(Function<MusicElement, Optional<RenderColor>> provider) {
+        this.noteColorProvider = provider;
+    }
+
+    /**
+     * Look up the highlight colour for the given source element, if any.
+     * Returns {@code null} when no provider is installed, no element is
+     * associated, or the provider returned an empty optional.
+     */
+    private RenderColor colorFor(MusicElement element) {
+        if (element == null || noteColorProvider == null) {
+            return null;
+        }
+        Optional<RenderColor> c = noteColorProvider.apply(element);
+        return c == null ? null : c.orElse(null);
     }
 
     /**
@@ -208,9 +246,16 @@ public final class ScorePainter {
         // Slightly thicker than a hairline so the join with a notehead the
         // stem merely passes through (not its own start point) reads as
         // solidly connected rather than a fragile single-point tangent.
+        RenderColor override = colorFor(stem.elementRef());
+        if (override != null) {
+            surface.setStroke(override);
+        }
         surface.setLineWidth(1.4);
         surface.strokeLine(stem.x(), stem.y1(), stem.x(), stem.y2());
         surface.setLineWidth(1.0);
+        if (override != null) {
+            surface.setStroke(RenderColor.BLACK);
+        }
     }
 
     private void drawGlyph(RenderSurface surface, StaffLayout staff, GlyphPlacement glyph) {
@@ -219,6 +264,23 @@ public final class ScorePainter {
         double headH = gap * 0.9;
         double sizeHint = gap * 4;
         Glyph g = glyph.glyph();
+        RenderColor override = colorFor(glyph.elementRef());
+        if (override != null) {
+            surface.setStroke(override);
+            surface.setFill(override);
+        }
+        try {
+            drawGlyphInner(surface, staff, glyph, gap, headW, headH, sizeHint, g);
+        } finally {
+            if (override != null) {
+                surface.setStroke(RenderColor.BLACK);
+                surface.setFill(RenderColor.BLACK);
+            }
+        }
+    }
+
+    private void drawGlyphInner(RenderSurface surface, StaffLayout staff, GlyphPlacement glyph,
+                                double gap, double headW, double headH, double sizeHint, Glyph g) {
         switch (g) {
             case NOTEHEAD_BLACK, NOTEHEAD_HALF, NOTEHEAD_WHOLE -> {
                 if (!drawSmuflCentered(surface, g, glyph.x(), glyph.y(), sizeHint)) {
@@ -322,15 +384,15 @@ public final class ScorePainter {
                 }
                 // STAFF_LINE / LEDGER_LINE / legacy STEM / BEAM handled elsewhere.
             }
-        }
-    }
+            }
+            }
 
-    /**
-     * Draw a beam segment as a thick rectangle (axis-aligned MVP; a full
-     * implementation would use a rotated polygon). Multi-level beams are
-     * stacked below (for stem-up groups) / above (stem-down groups) the
-     * primary beam.
-     */
+            /**
+            * Draw a beam segment as a thick rectangle (axis-aligned MVP; a full
+            * implementation would use a rotated polygon). Multi-level beams are
+            * stacked below (for stem-up groups) / above (stem-down groups) the
+            * primary beam.
+            */
     private void drawBeam(RenderSurface surface, StaffLayout staff, BeamPlacement beam) {
         double gap = staff.lineGap();
         double thickness = gap * 0.5;

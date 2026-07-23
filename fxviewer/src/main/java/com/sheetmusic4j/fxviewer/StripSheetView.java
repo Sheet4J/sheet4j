@@ -1,0 +1,299 @@
+package com.sheetmusic4j.fxviewer;
+
+import java.util.IdentityHashMap;
+import java.util.Optional;
+
+import com.sheetmusic4j.core.model.MusicElement;
+import com.sheetmusic4j.core.model.Score;
+import com.sheetmusic4j.engraving.Engraver;
+import com.sheetmusic4j.engraving.layout.LayoutMode;
+import com.sheetmusic4j.engraving.layout.LayoutOptions;
+import com.sheetmusic4j.engraving.layout.LayoutResult;
+
+import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.DoubleProperty;
+import javafx.beans.property.ObjectProperty;
+import javafx.beans.property.SimpleBooleanProperty;
+import javafx.beans.property.SimpleDoubleProperty;
+import javafx.beans.property.SimpleObjectProperty;
+import javafx.collections.FXCollections;
+import javafx.collections.MapChangeListener;
+import javafx.collections.ObservableMap;
+import javafx.geometry.Insets;
+import javafx.scene.canvas.Canvas;
+import javafx.scene.canvas.GraphicsContext;
+import javafx.scene.layout.Region;
+import javafx.scene.paint.Color;
+import javafx.scene.shape.Line;
+import javafx.scene.shape.Rectangle;
+
+/**
+ * One-line "strip" score view designed for play-along use. The score is
+ * engraved in {@link LayoutMode#STRIP} mode into one endless system; a
+ * fixed vertical cursor line sits at
+ * {@link #cursorScreenPositionProperty() cursorScreenPosition} of the
+ * viewport width, and the score canvas underneath is translated so the
+ * musical time given by {@link #cursorTimeProperty()} sits exactly under
+ * that cursor.
+ *
+ * <p>Advancing the cursor time is therefore a cheap {@code translateX}
+ * update - no re-engrave, no repaint - which is important for smooth
+ * playback. Highlight changes go through the same
+ * {@link #noteHighlights()} map as {@link SheetView}.
+ */
+public final class StripSheetView extends Region {
+
+    private static final double FALLBACK_HEIGHT = LayoutOptions.defaults().staffHeight()
+            + LayoutOptions.defaults().topMargin() * 2;
+
+    private final Canvas canvas = new Canvas();
+    private final Line cursor = new Line();
+    private final Rectangle clip = new Rectangle();
+    private final Engraver engraver = new Engraver();
+    private final ScoreRenderer renderer = new ScoreRenderer();
+
+    private final DoubleProperty cursorTime =
+            new SimpleDoubleProperty(this, "cursorTime", 0.0);
+
+    private final DoubleProperty cursorScreenPosition =
+            new SimpleDoubleProperty(this, "cursorScreenPosition", 0.3);
+
+    private final BooleanProperty cursorVisible =
+            new SimpleBooleanProperty(this, "cursorVisible", true);
+
+    private final ObjectProperty<Color> cursorColor =
+            new SimpleObjectProperty<>(this, "cursorColor", Color.CRIMSON);
+
+    private final DoubleProperty zoom = new SimpleDoubleProperty(this, "zoom", 1.0);
+
+    private final ObservableMap<MusicElement, Color> noteHighlights =
+            FXCollections.observableMap(new IdentityHashMap<>());
+
+    private Score score;
+    private LayoutResult layout;
+
+    /** Creates an empty strip view. */
+    public StripSheetView() {
+        setPadding(new Insets(4));
+        getChildren().addAll(canvas, cursor);
+        setClip(clip);
+        cursor.setStrokeWidth(2.0);
+        cursor.strokeProperty().bind(cursorColor);
+        cursor.visibleProperty().bind(cursorVisible);
+        renderer.setNoteColorProvider(this::highlightFor);
+
+        cursorTime.addListener((obs, o, n) -> updateCursor());
+        cursorScreenPosition.addListener((obs, o, n) -> updateCursor());
+        zoom.addListener((obs, o, n) -> rebuild());
+        noteHighlights.addListener((MapChangeListener<MusicElement, Color>) c -> repaint());
+
+        widthProperty().addListener((obs, o, n) -> {
+            clip.setWidth(n.doubleValue());
+            updateCursor();
+        });
+        heightProperty().addListener((obs, o, n) -> {
+            clip.setHeight(n.doubleValue());
+            cursor.setEndY(n.doubleValue());
+        });
+        canvas.setWidth(400);
+        canvas.setHeight(FALLBACK_HEIGHT);
+        setMinSize(200, 60);
+        setPrefSize(400, FALLBACK_HEIGHT);
+    }
+
+    /**
+     * Set the score to display. The score is engraved in
+     * {@link LayoutMode#STRIP} mode; other options are taken from
+     * {@link LayoutOptions#defaults()}. The cursor time is preserved.
+     */
+    public void setScore(Score score) {
+        this.score = score;
+        rebuild();
+    }
+
+    /** @return the currently displayed score, or {@code null}. */
+    public Score getScore() {
+        return score;
+    }
+
+    /**
+     * The last engraved layout, or {@code null} if no score has been set.
+     * Exposed so callers can inspect {@link LayoutResult#noteAnchors()}.
+     */
+    public LayoutResult getLayout() {
+        return layout;
+    }
+
+    /**
+     * Musical time (in quarter notes from the start of the score) at which
+     * the fixed cursor sits. Mutations only update a canvas translation -
+     * no re-engrave or repaint - so this is safe to animate at 60 fps.
+     */
+    public DoubleProperty cursorTimeProperty() {
+        return cursorTime;
+    }
+
+    public double getCursorTime() {
+        return cursorTime.get();
+    }
+
+    public void setCursorTime(double quarters) {
+        cursorTime.set(quarters);
+    }
+
+    /**
+     * Where the fixed cursor line sits as a fraction of the viewport
+     * width. Defaults to {@code 0.3} so a third of the viewport shows the
+     * upcoming music and two thirds shows the recently played music.
+     */
+    public DoubleProperty cursorScreenPositionProperty() {
+        return cursorScreenPosition;
+    }
+
+    public double getCursorScreenPosition() {
+        return cursorScreenPosition.get();
+    }
+
+    public void setCursorScreenPosition(double fraction) {
+        cursorScreenPosition.set(fraction);
+    }
+
+    /** Whether the cursor line is drawn. */
+    public BooleanProperty cursorVisibleProperty() {
+        return cursorVisible;
+    }
+
+    public boolean isCursorVisible() {
+        return cursorVisible.get();
+    }
+
+    public void setCursorVisible(boolean visible) {
+        cursorVisible.set(visible);
+    }
+
+    /** Colour of the cursor line. */
+    public ObjectProperty<Color> cursorColorProperty() {
+        return cursorColor;
+    }
+
+    public Color getCursorColor() {
+        return cursorColor.get();
+    }
+
+    public void setCursorColor(Color color) {
+        cursorColor.set(color);
+    }
+
+    /**
+     * Total musical duration of the currently-engraved score, in quarter
+     * notes. Zero when no score has been set.
+     */
+    public double totalDurationQuarters() {
+        return layout == null ? 0.0 : layout.totalDurationQuarters();
+    }
+
+    /**
+     * Live-observable per-element highlight colours. Identity-comparison
+     * on keys; mutations only trigger a canvas repaint.
+     */
+    public ObservableMap<MusicElement, Color> noteHighlights() {
+        return noteHighlights;
+    }
+
+    /** Render zoom factor (positive). Values above 1 enlarge the score. */
+    public DoubleProperty zoomProperty() {
+        return zoom;
+    }
+
+    public double getZoom() {
+        return zoom.get();
+    }
+
+    public void setZoom(double factor) {
+        if (factor > 0) {
+            zoom.set(factor);
+        }
+    }
+
+    private Optional<RenderColor> highlightFor(MusicElement element) {
+        Color c = noteHighlights.get(element);
+        if (c == null) {
+            return Optional.empty();
+        }
+        return Optional.of(new RenderColor(
+                (int) Math.round(c.getRed() * 255),
+                (int) Math.round(c.getGreen() * 255),
+                (int) Math.round(c.getBlue() * 255)));
+    }
+
+    private void rebuild() {
+        double zoomFactor = Math.max(zoom.get(), 0.01);
+        if (score == null) {
+            layout = null;
+            canvas.setWidth(400);
+            canvas.setHeight(FALLBACK_HEIGHT * zoomFactor);
+            canvas.getGraphicsContext2D().clearRect(0, 0, canvas.getWidth(), canvas.getHeight());
+            updateCursor();
+            return;
+        }
+        LayoutOptions options = LayoutOptions.defaults().toBuilder()
+                .layoutMode(LayoutMode.STRIP)
+                .showTitleTexts(false)
+                .build();
+        layout = engraver.layout(score, options);
+        canvas.setWidth(Math.max(layout.width() * zoomFactor, 1.0));
+        canvas.setHeight(Math.max(layout.height() * zoomFactor, 1.0));
+        setPrefHeight(canvas.getHeight());
+        paintCurrent();
+        updateCursor();
+    }
+
+    private void repaint() {
+        if (layout == null) {
+            return;
+        }
+        paintCurrent();
+    }
+
+    private void paintCurrent() {
+        double zoomFactor = Math.max(zoom.get(), 0.01);
+        GraphicsContext gc = canvas.getGraphicsContext2D();
+        gc.clearRect(0, 0, canvas.getWidth(), canvas.getHeight());
+        gc.save();
+        gc.scale(zoomFactor, zoomFactor);
+        renderer.render(gc, layout, layout.width(), layout.height());
+        gc.restore();
+    }
+
+    private void updateCursor() {
+        double viewportWidth = getWidth();
+        double cursorScreenX = viewportWidth * clamp01(cursorScreenPosition.get());
+        cursor.setStartX(cursorScreenX);
+        cursor.setEndX(cursorScreenX);
+        cursor.setStartY(0);
+        cursor.setEndY(getHeight());
+        if (layout == null) {
+            canvas.setLayoutX(0);
+            return;
+        }
+        double zoomFactor = Math.max(zoom.get(), 0.01);
+        double xInLayout = layout.xAtTime(cursorTime.get()) * zoomFactor;
+        canvas.setLayoutX(cursorScreenX - xInLayout);
+    }
+
+    @Override
+    protected void layoutChildren() {
+        // Cursor is positioned via its own start/end coords, and canvas via
+        // its layoutX property. Nothing to lay out here.
+    }
+
+    private static double clamp01(double v) {
+        if (v < 0) {
+            return 0;
+        }
+        if (v > 1) {
+            return 1;
+        }
+        return v;
+    }
+}

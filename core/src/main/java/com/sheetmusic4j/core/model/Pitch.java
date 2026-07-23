@@ -63,6 +63,44 @@ public record Pitch(Step step, int octave, int alter) {
     }
 
     /**
+     * Build a {@link Pitch} from a MIDI note number, using the given key
+     * signature to pick the diatonic-friendly enharmonic spelling for black
+     * keys: sharps in sharp keys, flats in flat keys, and either in
+     * C major (defaulting to sharps).
+     *
+     * <p>Only affects black-key semitones (1, 3, 6, 8, 10). White-key
+     * notes always spell as their natural step regardless of key.
+     *
+     * @param midi the MIDI note number (0-127)
+     * @param key  the key signature the pitch is being interpreted in;
+     *             {@code null} falls back to {@link #fromMidiNumber(int)}
+     *             (sharps).
+     * @return a Pitch representing the given note number
+     */
+    public static Pitch fromMidiNumber(int midi, KeySignature key) {
+        if (key == null || key.flats() == 0) {
+            return fromMidiNumber(midi);
+        }
+        int octave = midi / 12 - 1;
+        int semitone = midi % 12;
+        return switch (semitone) {
+            case 0 -> new Pitch(Step.C, octave, 0);
+            case 1 -> new Pitch(Step.D, octave, -1);
+            case 2 -> new Pitch(Step.D, octave, 0);
+            case 3 -> new Pitch(Step.E, octave, -1);
+            case 4 -> new Pitch(Step.E, octave, 0);
+            case 5 -> new Pitch(Step.F, octave, 0);
+            case 6 -> new Pitch(Step.G, octave, -1);
+            case 7 -> new Pitch(Step.G, octave, 0);
+            case 8 -> new Pitch(Step.A, octave, -1);
+            case 9 -> new Pitch(Step.A, octave, 0);
+            case 10 -> new Pitch(Step.B, octave, -1);
+            case 11 -> new Pitch(Step.B, octave, 0);
+            default -> throw new IllegalStateException("Unexpected semitone: " + semitone);
+        };
+    }
+
+    /**
      * Diatonic staff step index used for vertical positioning: C0 = 0, D0 = 1, ...
      *
      * @return the diatonic step number for use in engraving layout

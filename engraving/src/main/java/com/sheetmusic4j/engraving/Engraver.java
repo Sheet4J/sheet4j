@@ -235,19 +235,18 @@ public final class Engraver {
 
     public LayoutResult layout(Score score, LayoutOptions options) {
         List<TextPlacement> texts = new ArrayList<>();
+        List<NoteAnchor> anchors = new ArrayList<>();
         double titleBlockHeight = layoutTitleBlock(score, options, texts);
 
         if (score.parts().isEmpty()) {
             SystemLayout empty = new SystemLayout(0, 0, options.systemWidth(), List.of());
-            return new LayoutResult(List.of(empty), texts, options.systemWidth(),
-                    options.topMargin() + titleBlockHeight + options.staffHeight());
+            return new LayoutResult(List.of(empty), texts, List.of(), options.systemWidth(), options.topMargin() + titleBlockHeight + options.staffHeight());
         }
 
         int[] groupNestingDepths = computeGroupNestingDepths(score);
         int maxGroupNestingDepth = maxOrMinusOne(groupNestingDepths);
         double labelReserve = computeLabelReserve(score, options, maxGroupNestingDepth);
         double contentLeft = options.leftMargin() + labelReserve;
-        double staffWidth = options.systemWidth() - contentLeft - options.rightMargin();
 
         List<PartInfo> parts = new ArrayList<>(score.parts().size());
         int measureCount = 0;
@@ -258,16 +257,37 @@ public final class Engraver {
         }
         if (measureCount == 0) {
             SystemLayout empty = new SystemLayout(0, 0, options.systemWidth(), List.of());
-            return new LayoutResult(List.of(empty), texts, options.systemWidth(),
-                    options.topMargin() + titleBlockHeight + options.staffHeight());
+            return new LayoutResult(List.of(empty), texts, List.of(), options.systemWidth(), options.topMargin() + titleBlockHeight + options.staffHeight());
         }
 
+        double[] measureStartQuarters = new double[measureCount];
+        double[] measureDurationQuarters = new double[measureCount];
+        computeMeasureTimes(parts, measureCount, measureStartQuarters, measureDurationQuarters);
+
+        boolean stripMode = options.layoutMode() == LayoutMode.STRIP;
+        double effectiveSystemWidth;
+        double staffWidth;
         double firstSystemHeader = maxHeaderAdvanceAtRowStart(parts, 0, options);
         List<Double> sharedWeights = sharedMeasureWeights(parts, measureCount);
         List<Double> sharedMinWidths = sharedMeasureMinWidths(parts, measureCount, options);
-        List<Double> baseWidths = distributeWidths(
-                sharedWeights, Math.max(1.0, staffWidth - firstSystemHeader), sharedMinWidths);
-        List<int[]> rows = computeRowRanges(baseWidths, staffWidth, firstSystemHeader, parts, options);
+        List<Double> baseWidths;
+        List<int[]> rows;
+        if (stripMode) {
+            baseWidths = new ArrayList<>(sharedMinWidths);
+            double contentSum = 0.0;
+            for (double w : baseWidths) {
+                contentSum += w;
+            }
+            effectiveSystemWidth = contentLeft + firstSystemHeader + contentSum + options.rightMargin();
+            staffWidth = firstSystemHeader + contentSum;
+            rows = new ArrayList<>();
+            rows.add(new int[]{0, measureCount});
+        } else {
+            effectiveSystemWidth = options.systemWidth();
+            staffWidth = options.systemWidth() - contentLeft - options.rightMargin();
+            baseWidths = distributeWidths(sharedWeights, Math.max(1.0, staffWidth - firstSystemHeader), sharedMinWidths);
+            rows = computeRowRanges(baseWidths, staffWidth, firstSystemHeader, parts, options);
+        }
 
         List<SystemLayout> systems = new ArrayList<>(rows.size());
         double y = options.topMargin() + titleBlockHeight;
@@ -307,6 +327,7 @@ public final class Engraver {
             if (rowHasHarmony) {
                 staffTop += options.staffLineGap() * HARMONY_ABOVE_RESERVE_GAPS;
             }
+            int systemStaffIndex = 0;
             for (int partIdx = 0; partIdx < parts.size(); partIdx++) {
                 PartInfo p = parts.get(partIdx);
                 StaffLayout firstStaffOfPart = null;
@@ -314,7 +335,10 @@ public final class Engraver {
                 for (int staffIdx = 0; staffIdx < p.staveCount(); staffIdx++) {
                     StaffLayout sl = layoutStaffRow(
                             p, staffIdx, contentLeft, staffTop,
-                            options, start, endExclusive, rowWidths, rowIdx == 0, texts);
+                            options, start, endExclusive, rowWidths, rowIdx == 0, texts,
+                            partIdx, systemStaffIndex,
+                            measureStartQuarters, measureDurationQuarters, anchors);
+                    systemStaffIndex++;
                     stavesForRow.add(sl);
                     if (firstStaffOfPart == null) {
                         firstStaffOfPart = sl;
@@ -359,14 +383,15 @@ public final class Engraver {
             emitGroupBracketsAndBarlines(score.partGroups(), groupNestingDepths,
                     maxGroupNestingDepth, partFirstStaves, partLastStaves,
                     contentLeft, options, rowIdx, bracketsForRow, barlinesForRow, texts);
-            systems.add(new SystemLayout(0, y, options.systemWidth(),
+            systems.add(new SystemLayout(0, y, effectiveSystemWidth,
                     stavesForRow, barlinesForRow, bracketsForRow));
             y = staffTop;
             }
 
-        double height = y - options.staffSpacing() + options.rightMargin();
-        return new LayoutResult(systems, texts, options.systemWidth(), height);
-        }
+            double height = y - options.staffSpacing() + options.rightMargin();
+            anchors.sort((a, b) -> Double.compare(a.onsetQuarters(), b.onsetQuarters()));
+            return new LayoutResult(systems, texts, anchors, effectiveSystemWidth, height);
+            }
 
         /**
         * Emit the score-level title / subtitle text placements at the top of the
@@ -377,6 +402,9 @@ public final class Engraver {
         * the first system's staves and pushes them down by the returned height.
         */
         private static double layoutTitleBlock(Score score, LayoutOptions options, List<TextPlacement> texts) {
+        if (!options.showTitleTexts()) {
+            return 0.0;
+        }
         double gap = options.staffLineGap();
         double centerX = options.systemWidth() / 2.0;
         double y = options.topMargin();
@@ -714,13 +742,20 @@ public final class Engraver {
     static double headerAdvance(Clef clef, KeySignature key, TimeSignature time, LayoutOptions options) {
         double gap = options.staffLineGap();
         // Left padding + clef block. gap*0.5 opening pad + gap*3.5 clef space.
-        double advance = gap * 4;
-        if (key != null && (key.sharps() != 0 || key.flats() != 0)) {
+        double advance = 0.0;
+        if (options.showClef()) {
+            advance += gap * 4;
+        } else {
+            // Still keep a small opening pad so the first note isn't glued
+            // to the system barline when the clef is suppressed.
+            advance += gap;
+        }
+        if (key != null && options.showKeySignature() && (key.sharps() != 0 || key.flats() != 0)) {
             int count = Math.min(7, Math.max(key.sharps(), key.flats()));
             double accAdvance = gap * 1.1;
             advance += count * accAdvance + gap * 0.5;
         }
-        if (time != null) {
+        if (time != null && options.showTimeSignature()) {
             double digitWidth = gap * 1.4;
             int beatsLen = Integer.toString(time.beats()).length();
             int beatTypeLen = Integer.toString(time.beatType()).length();
@@ -1159,7 +1194,11 @@ public final class Engraver {
     private StaffLayout layoutStaffRow(PartInfo partInfo, int staffIdx, double x, double y,
                                        LayoutOptions options,
                                        int start, int endExclusive, List<Double> rowWidths,
-                                       boolean firstRow, List<TextPlacement> texts) {
+                                       boolean firstRow, List<TextPlacement> texts,
+                                       int partIndex, int systemStaffIndex,
+                                       double[] measureStartQuarters,
+                                       double[] measureDurationQuarters,
+                                       List<NoteAnchor> anchors) {
         Part part = partInfo.part();
         int staveCount = partInfo.staveCount();
         int staffNumber = staffIdx + 1;
@@ -1192,19 +1231,24 @@ public final class Engraver {
             TimeSignature currentTime = partInfo.timeAt(idx);
 
             double measureWidth = rowWidths.get(idx - start);
-            measureLayouts.add(new MeasureLayout(measure.number(), cursorX, measureWidth));
+            double measureStartQ = idx < measureStartQuarters.length ? measureStartQuarters[idx] : 0.0;
+            double measureDurQ = idx < measureDurationQuarters.length ? measureDurationQuarters[idx] : 0.0;
+            measureLayouts.add(new MeasureLayout(measure.number(), cursorX, measureWidth,
+                    measureStartQ, measureStartQ + measureDurQ));
 
             double contentStart = cursorX + options.staffLineGap();
             if (firstMeasureInRow) {
                 double clefY = y + clefAnchorLineIndex(currentClef) * options.staffLineGap();
-                glyphs.add(new GlyphPlacement(cursorX + options.staffLineGap() * 0.5,
-                        clefY, clefGlyph(currentClef), 4));
-                contentStart = cursorX + options.staffLineGap() * 4;
-                if (currentKey.fifths() != 0) {
+                if (options.showClef()) {
+                    glyphs.add(new GlyphPlacement(cursorX + options.staffLineGap() * 0.5,
+                            clefY, clefGlyph(currentClef), 4));
+                    contentStart = cursorX + options.staffLineGap() * 4;
+                }
+                if (options.showKeySignature() && currentKey.fifths() != 0) {
                     contentStart = placeKeySignature(glyphs, currentKey, currentClef, contentStart, y, options);
                 }
                 boolean showTime = (idx == 0 && firstRow) || partInfo.timeChangedAt(idx);
-                if (currentTime != null && showTime) {
+                if (options.showTimeSignature() && currentTime != null && showTime) {
                     contentStart = placeTimeSignature(glyphs, currentTime, contentStart, y, options);
                 }
             }
@@ -1269,13 +1313,13 @@ public final class Engraver {
                     measureTopY = Math.min(measureTopY, stemTipY[i]);
                 }
             }
+            double localOnset = 0.0;
             for (int i = 0, timedIdx = 0; i < elements.size(); i++) {
                 MusicElement element = elements.get(i);
                 if (element instanceof Direction direction) {
                     double dirX = anchorX(timedX, timedIdx, fallbackX);
                     if (staffIdx == 0) {
-                        placeDirection(texts, glyphs, hairpins, wedgeCandidates, direction, dirX, y, options,
-                                measureTopY);
+                        placeDirection(texts, glyphs, hairpins, wedgeCandidates, direction, dirX, y, options, measureTopY);
                     }
                 } else if (element instanceof Harmony harmony) {
                     double harmonyX = anchorX(timedX, timedIdx, fallbackX);
@@ -1285,12 +1329,13 @@ public final class Engraver {
                 } else {
                     int ti = timedIdx++;
                     double noteX = timedX[ti];
-                    placeElement(glyphs, beams, ties, slurs, tuplets, stems, openBeams, tieCandidates,
-                            slurCandidates, tupletCandidates, element, noteX, y, currentClef, options,
-                            stemTipY[ti], stemUpArr[ti], hasStemArr[ti]);
+                    placeElement(glyphs, beams, ties, slurs, tuplets, stems, openBeams, tieCandidates, slurCandidates, tupletCandidates, element, noteX, y, currentClef, options, stemTipY[ti], stemUpArr[ti], hasStemArr[ti]);
                     if (staffIdx == 0) {
                         placeLyrics(texts, element, noteX, y, options);
                     }
+                    double elDur = element.duration().inQuarters();
+                    emitNoteAnchors(anchors, element, noteX, y, currentClef, options, stemTipY[ti], hasStemArr[ti], partIndex, systemStaffIndex, measure.number(), measureStartQ + localOnset, elDur);
+                    localOnset += elDur;
                 }
             }
 
@@ -1563,15 +1608,15 @@ public final class Engraver {
             double gap = options.staffLineGap();
             int restStep = restAnchorStaffStep(rest.type());
             double y = staffY + restStep * (gap / 2.0);
-            glyphs.add(new GlyphPlacement(noteX, y, restGlyph(rest.type()), restStep));
+            glyphs.add(new GlyphPlacement(noteX, y, restGlyph(rest.type()), restStep, MarkingCategory.NOTE, rest));
             for (int i = 0; i < rest.dots(); i++) {
                 double dx = noteX + gap * 1.2 + i * gap * 0.6;
-                glyphs.add(new GlyphPlacement(dx, y, Glyph.AUG_DOT, restStep));
+                glyphs.add(new GlyphPlacement(dx, y, Glyph.AUG_DOT, restStep, MarkingCategory.NOTE, rest));
             }
             updateTupletCandidates(tupletCandidates, tuplets, rest.tuplets(), rest.timeModification(),
                     noteX, y, gap);
         }
-    }
+        }
 
     /**
      * Emit direction placements at the given anchor x. Words / metronome go
@@ -1806,11 +1851,11 @@ public final class Engraver {
         if (acc != null) {
             Glyph accGlyph = accidentalGlyph(acc);
             if (accGlyph != null) {
-                glyphs.add(new GlyphPlacement(noteX - gap * 1.5, y, accGlyph, staffStep));
+                glyphs.add(new GlyphPlacement(noteX - gap * 1.5, y, accGlyph, staffStep, MarkingCategory.NOTE, note));
             }
         }
 
-        glyphs.add(new GlyphPlacement(noteX, y, noteheadGlyph(note.type()), staffStep));
+        glyphs.add(new GlyphPlacement(noteX, y, noteheadGlyph(note.type()), staffStep, MarkingCategory.NOTE, note));
 
         // A chord shares one stem across all its notes, drawn once by
         // whichever note is stem-responsible (see placeElement); the other
@@ -1828,7 +1873,7 @@ public final class Engraver {
         double stemInset = noteheadHalfWidth(note.type(), gap) * 0.8;
         double stemX = stemUp ? noteX + stemInset : noteX - stemInset;
         if (hasStem && isStemResponsible) {
-            stems.add(new StemPlacement(stemX, y, stemTipY));
+            stems.add(new StemPlacement(stemX, y, stemTipY, note));
         }
 
         // Articulations sit on the side opposite the stem, clear of the notehead.
@@ -1837,7 +1882,7 @@ public final class Engraver {
                     ? Glyph.ARTICULATION_STACCATO
                     : Glyph.ARTICULATION_ACCENT;
             double articulationY = stemUp ? y + gap * 2.6 : y - gap * 2.6;
-            glyphs.add(new GlyphPlacement(noteX, articulationY, articulationGlyph, staffStep));
+            glyphs.add(new GlyphPlacement(noteX, articulationY, articulationGlyph, staffStep, MarkingCategory.NOTE, note));
         }
 
         // Augmentation dots.
@@ -1845,7 +1890,7 @@ public final class Engraver {
             int dotStep = staffStep % 2 == 0 ? staffStep - 1 : staffStep;
             double dx = noteX + gap * 1.2 + i * gap * 0.6;
             double dy = staffY + dotStep * (gap / 2.0);
-            glyphs.add(new GlyphPlacement(dx, dy, Glyph.AUG_DOT, dotStep));
+            glyphs.add(new GlyphPlacement(dx, dy, Glyph.AUG_DOT, dotStep, MarkingCategory.NOTE, note));
         }
 
         // Beam vs. flag handling. A stacked chord note that carries no
@@ -1861,7 +1906,7 @@ public final class Engraver {
         if (!beamed && hasStem && isStemResponsible) {
             Glyph flag = flagGlyph(note.type(), stemUp);
             if (flag != null) {
-                glyphs.add(new GlyphPlacement(stemX, stemTipY, flag, staffStep));
+                glyphs.add(new GlyphPlacement(stemX, stemTipY, flag, staffStep, MarkingCategory.NOTE, note));
             }
         } else if (note.isBeamed() && hasStem && isBeamDataResponsible) {
             processBeams(beams, openBeams, note.beams(), stemX, stemTipY, stemUp);
@@ -2273,7 +2318,109 @@ public final class Engraver {
                     outStemUp[j] = up;
                 }
                 runStart = -1;
-            }
-        }
-    }
-}
+                }
+                }
+                }
+
+                /**
+                * Compute the per-measure musical onset (start-quarters) and duration
+                * (in quarter notes) across the whole score. Both arrays are filled
+                * in-place; they must be pre-sized to {@code measureCount}.
+                *
+                * <p>For each measure we take the maximum sum-of-durations found in any
+                * part's single staff — filtering by staff so a grand-staff part
+                * doesn't double-count its two staves' elements — then fall back to
+                * the effective time signature when the source measure carries no
+                * time-consuming elements at all (a rare case, e.g. a measure that only
+                * contains a tempo direction).
+                */
+                private static void computeMeasureTimes(List<PartInfo> parts, int measureCount,
+                                            double[] outStart, double[] outDuration) {
+                double cursor = 0.0;
+                for (int idx = 0; idx < measureCount; idx++) {
+                double dur = 0.0;
+                for (PartInfo p : parts) {
+                if (idx >= p.part().measures().size()) {
+                    continue;
+                }
+                Measure m = p.part().measures().get(idx);
+                int staves = p.staveCount();
+                for (int staffIdx = 0; staffIdx < staves; staffIdx++) {
+                    int staffNumber = staffIdx + 1;
+                    double staffDur = 0.0;
+                    for (MusicElement e : m.elements()) {
+                        if (e instanceof Direction || e instanceof Harmony) {
+                            continue;
+                        }
+                        if (staves > 1 && elementStaff(e) != staffNumber) {
+                            continue;
+                        }
+                        staffDur += e.duration().inQuarters();
+                    }
+                    dur = Math.max(dur, staffDur);
+                }
+                }
+                if (dur == 0.0) {
+                for (PartInfo p : parts) {
+                    TimeSignature ts = p.timeAt(idx);
+                    if (ts != null) {
+                        dur = ts.beats() * 4.0 / ts.beatType();
+                        break;
+                    }
+                }
+                }
+                outStart[idx] = cursor;
+                outDuration[idx] = dur;
+                cursor += dur;
+                }
+                }
+
+                /**
+                * Emit one or more {@link NoteAnchor}s for a placed measure element.
+                * A {@link Note} or {@link Rest} produces exactly one anchor with the
+                * element itself as {@code elementRef}; a {@link Chord} produces one
+                * anchor per member note (each with the note as {@code elementRef} at
+                * the same x/onset), plus one anchor for the chord itself so callers
+                * may highlight the whole chord as a unit.
+                */
+                private static void emitNoteAnchors(List<NoteAnchor> anchors, MusicElement element,
+                                        double noteX, double staffY, Clef clef, LayoutOptions options,
+                                        double stemTipY, boolean hasStem,
+                                        int partIndex, int systemStaffIndex, int measureNumber,
+                                        double onsetQuarters, double durationQuarters) {
+                double gap = options.staffLineGap();
+                double approxWidth = gap * 2.5;
+                if (element instanceof Note note) {
+                int step = staffStep(note.pitch(), clef);
+                double y = staffY + step * (gap / 2.0);
+                double height = hasStem ? Math.abs(stemTipY - y) + gap : gap * 2;
+                anchors.add(new NoteAnchor(note, partIndex, systemStaffIndex, measureNumber,
+                    onsetQuarters, durationQuarters, noteX, y, approxWidth, height));
+                } else if (element instanceof Chord chord) {
+                double minY = Double.MAX_VALUE;
+                double maxY = -Double.MAX_VALUE;
+                for (Note n : chord.notes()) {
+                int step = staffStep(n.pitch(), clef);
+                double y = staffY + step * (gap / 2.0);
+                minY = Math.min(minY, y);
+                maxY = Math.max(maxY, y);
+                double memberHeight = hasStem ? Math.abs(stemTipY - y) + gap : gap * 2;
+                anchors.add(new NoteAnchor(n, partIndex, systemStaffIndex, measureNumber,
+                        onsetQuarters, durationQuarters, noteX, y, approxWidth, memberHeight));
+                }
+                double chordCenter = (minY + maxY) / 2.0;
+                double chordHeight = (maxY - minY) + gap * 2;
+                if (hasStem) {
+                chordHeight = Math.max(chordHeight, Math.abs(stemTipY - minY) + gap);
+                chordHeight = Math.max(chordHeight, Math.abs(stemTipY - maxY) + gap);
+                }
+                anchors.add(new NoteAnchor(chord, partIndex, systemStaffIndex, measureNumber,
+                    onsetQuarters, durationQuarters, noteX, chordCenter, approxWidth, chordHeight));
+                } else if (element instanceof Rest rest) {
+                int restStep = restAnchorStaffStep(rest.type());
+                double y = staffY + restStep * (gap / 2.0);
+                anchors.add(new NoteAnchor(rest, partIndex, systemStaffIndex, measureNumber,
+                    onsetQuarters, durationQuarters, noteX, y, approxWidth, gap * 2));
+                }
+                }
+                }

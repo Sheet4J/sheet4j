@@ -1,7 +1,10 @@
 package com.sheetmusic4j.fxviewer;
 
+import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 
+import com.sheetmusic4j.core.model.MusicElement;
 import com.sheetmusic4j.engraving.layout.LayoutResult;
 import com.sheetmusic4j.engraving.glyph.MarkingCategory;
 
@@ -61,5 +64,13 @@ public final class ScoreRenderer {
     /** @return whether brackets are currently drawn by the underlying painter. */
     public boolean isBracketsVisible() {
         return painter.isBracketsVisible();
+    }
+
+    /**
+     * Install a per-element colour provider on the underlying painter. See
+     * {@link ScorePainter#setNoteColorProvider(Function)}.
+     */
+    public void setNoteColorProvider(Function<MusicElement, Optional<RenderColor>> provider) {
+        painter.setNoteColorProvider(provider);
     }
     }
