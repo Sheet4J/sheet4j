@@ -7,7 +7,7 @@
     <parent>
         <groupId>com.sheetmusic4j</groupId>
         <artifactId>parent</artifactId>
-        <version>0.0.1</version>
+        <version>0.0.2-SNAPSHOT</version>
     </parent>
 
     <artifactId>fxviewer</artifactId>
@@ -34,9 +34,9 @@
             <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
-        </dependencies>
+    </dependencies>
 
-        <build>
+    <build>
         <plugins>
             <!-- Opt in to Maven Central publishing (parent defaults to skip=true). -->
             <plugin>
@@ -47,5 +47,5 @@
                 </configuration>
             </plugin>
         </plugins>
-        </build>
-        </project>
+    </build>
+</project>
