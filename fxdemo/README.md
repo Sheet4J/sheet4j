@@ -1,6 +1,4 @@
-#  
-
-:: FX Demo
+# Sheetmusic4J :: FX Demo
 
 Standalone JavaFX testbed for the Sheetmusic4J engraving/rendering pipeline. Exposes the same `ScorePainter` used by the
 on-screen viewer through a headless AWT surface, so its output can be compared to a trusted reference in tests.
