@@ -45,6 +45,8 @@ import javafx.scene.control.Separator;
 import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.TextArea;
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
@@ -75,6 +77,8 @@ public final class SheetDemoApp extends Application {
 
     private final SheetView sheetView = new SheetView();
     private final PDFView pdfView = new PDFView();
+    private final ImageView imageView = new ImageView();
+    private final ScrollPane imageScroll = new ScrollPane(imageView);
     private final TextArea debugArea = new TextArea();
     private final Label statusLabel = new Label("Ready.");
     private final Label zoomLabel = new Label();
@@ -85,6 +89,7 @@ public final class SheetDemoApp extends Application {
 
     private SplitPane split;
     private BorderPane pdfPane;
+    private BorderPane imagePane;
     private BorderPane debugPane;
     private BorderPane diffPane;
     private ScrollPane scoreScroll;
@@ -269,6 +274,14 @@ public final class SheetDemoApp extends Application {
         pdfPane = new BorderPane(pdfView);
         pdfPane.setTop(sectionTitle("Reference PDF"));
 
+        imageView.setPreserveRatio(true);
+        imageView.setSmooth(true);
+        imageScroll.setPannable(true);
+        imageScroll.setFitToWidth(true);
+        imageScroll.setFitToHeight(true);
+        imagePane = new BorderPane(imageScroll);
+        imagePane.setTop(sectionTitle("Reference image"));
+
         debugArea.setEditable(false);
         debugArea.setWrapText(false);
         debugArea.setStyle("-fx-font-family: 'monospaced';");
@@ -342,15 +355,27 @@ public final class SheetDemoApp extends Application {
             currentScore = score;
             sheetView.setScore(score);
             Optional<Path> pdf = PdfSibling.existingPathFor(path);
+            Optional<Path> image = pdf.isPresent()
+                    ? Optional.empty()
+                    : ImageSibling.existingPathFor(path);
             showPdf(pdf);
+            showImage(image);
             updateDebug(score, pdf);
             stage.setTitle("Sheetmusic4J Demo - " + path.getFileName());
             generateReferenceButton.setDisable(pdf.isEmpty());
-            diffStatus.setText(pdf.isPresent()
-                    ? "Click 'Compare against PDF' to render the diff report."
-                    : "No sibling PDF for this score - diff disabled.");
-            statusLabel.setText("Loaded: " + path.toAbsolutePath()
-                    + (pdf.isPresent() ? "  (PDF: " + pdf.get().getFileName() + ")" : ""));
+            String referenceHint;
+            if (pdf.isPresent()) {
+                referenceHint = "  (PDF: " + pdf.get().getFileName() + ")";
+                diffStatus.setText("Click 'Compare against PDF' to render the diff report.");
+            } else if (image.isPresent()) {
+                referenceHint = "  (image: " + image.get().getFileName() + ")";
+                diffStatus.setText("No sibling PDF for this score - diff disabled. "
+                        + "Showing sibling image " + image.get().getFileName() + " instead.");
+            } else {
+                referenceHint = "";
+                diffStatus.setText("No sibling PDF for this score - diff disabled.");
+            }
+            statusLabel.setText("Loaded: " + path.toAbsolutePath() + referenceHint);
         } catch (RuntimeException ex) {
             showError("Failed to open file", path + "\n\n" + ex.getMessage());
             statusLabel.setText("Error loading: " + path);
@@ -378,7 +403,41 @@ public final class SheetDemoApp extends Application {
 
     private void removePdf() {
         split.getItems().remove(pdfPane);
-        split.setDividerPositions(0.72);
+        if (!split.getItems().contains(imagePane)) {
+            split.setDividerPositions(0.72);
+        }
+    }
+
+    private void showImage(Optional<Path> image) {
+        boolean shown = split.getItems().contains(imagePane);
+        if (image.isPresent()) {
+            try (InputStream in = Files.newInputStream(image.get())) {
+                Image loaded = new Image(in);
+                if (loaded.isError()) {
+                    throw new IOException("Image failed to decode: " + image.get());
+                }
+                imageView.setImage(loaded);
+                if (!shown) {
+                    // Insert the image pane between the score and the debug pane.
+                    int index = Math.min(split.getItems().size(), 1);
+                    split.getItems().add(index, imagePane);
+                    split.setDividerPositions(0.42, 0.80);
+                }
+            } catch (IOException | RuntimeException ex) {
+                removeImage();
+                statusLabel.setText("Could not display image: " + ex.getMessage());
+            }
+        } else {
+            removeImage();
+        }
+    }
+
+    private void removeImage() {
+        split.getItems().remove(imagePane);
+        imageView.setImage(null);
+        if (!split.getItems().contains(pdfPane)) {
+            split.setDividerPositions(0.72);
+        }
     }
 
     /**
