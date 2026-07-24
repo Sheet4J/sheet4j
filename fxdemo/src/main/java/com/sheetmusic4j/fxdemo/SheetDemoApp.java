@@ -1,5 +1,15 @@
 package com.sheetmusic4j.fxdemo;
 
+import java.awt.Color;
+import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Optional;
+import java.util.OptionalInt;
+
 import com.dlsc.pdfviewfx.PDFView;
 import com.sheetmusic4j.core.io.ScoreFile;
 import com.sheetmusic4j.core.model.MusicElement;
@@ -14,6 +24,7 @@ import com.sheetmusic4j.fxdemo.reference.DiffReportWriter;
 import com.sheetmusic4j.fxdemo.reference.ImageStack;
 import com.sheetmusic4j.fxdemo.reference.PdfRasterizer;
 import com.sheetmusic4j.fxviewer.SheetView;
+
 import javafx.animation.Animation;
 import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
@@ -22,13 +33,17 @@ import javafx.application.Platform;
 import javafx.concurrent.Task;
 import javafx.geometry.Insets;
 import javafx.scene.Scene;
-import javafx.scene.control.*;
+import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
+import javafx.scene.control.CheckMenuItem;
 import javafx.scene.control.Label;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuBar;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.ScrollPane;
+import javafx.scene.control.Separator;
+import javafx.scene.control.SeparatorMenuItem;
+import javafx.scene.control.SplitPane;
 import javafx.scene.control.TextArea;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCodeCombination;
@@ -40,16 +55,6 @@ import javafx.scene.web.WebView;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 import javafx.util.Duration;
-
-import java.awt.*;
-import java.awt.image.BufferedImage;
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.List;
-import java.util.Optional;
-import java.util.OptionalInt;
 
 /**
  * Standalone demo/testbed for the Sheetmusic4J {@link SheetView}. Provides a File menu
@@ -317,9 +322,11 @@ public final class SheetDemoApp extends Application {
         FileChooser chooser = new FileChooser();
         chooser.setTitle("Open score");
         chooser.getExtensionFilters().addAll(
-                new FileChooser.ExtensionFilter("Score files", "*.musicxml", "*.xml", "*.mxl", "*.mid", "*.midi"),
+                new FileChooser.ExtensionFilter("Score files",
+                        "*.musicxml", "*.xml", "*.mxl", "*.mid", "*.midi", "*.abc"),
                 new FileChooser.ExtensionFilter("MusicXML", "*.musicxml", "*.xml", "*.mxl"),
                 new FileChooser.ExtensionFilter("MIDI", "*.mid", "*.midi"),
+                new FileChooser.ExtensionFilter("ABC", "*.abc"),
                 new FileChooser.ExtensionFilter("All files", "*.*"));
         var file = chooser.showOpenDialog(stage);
         if (file != null) {

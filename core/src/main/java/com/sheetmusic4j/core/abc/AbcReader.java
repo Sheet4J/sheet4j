@@ -1,0 +1,1337 @@
+package com.sheetmusic4j.core.abc;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import com.sheetmusic4j.core.model.Accidental;
+import com.sheetmusic4j.core.model.Attributes;
+import com.sheetmusic4j.core.model.Chord;
+import com.sheetmusic4j.core.model.Clef;
+import com.sheetmusic4j.core.model.Creator;
+import com.sheetmusic4j.core.model.Direction;
+import com.sheetmusic4j.core.model.DirectionType;
+import com.sheetmusic4j.core.model.Duration;
+import com.sheetmusic4j.core.model.KeySignature;
+import com.sheetmusic4j.core.model.Lyric;
+import com.sheetmusic4j.core.model.Measure;
+import com.sheetmusic4j.core.model.MusicElement;
+import com.sheetmusic4j.core.model.Note;
+import com.sheetmusic4j.core.model.NoteType;
+import com.sheetmusic4j.core.model.Part;
+import com.sheetmusic4j.core.model.Pitch;
+import com.sheetmusic4j.core.model.Rest;
+import com.sheetmusic4j.core.model.Score;
+import com.sheetmusic4j.core.model.Slur;
+import com.sheetmusic4j.core.model.Step;
+import com.sheetmusic4j.core.model.Syllabic;
+import com.sheetmusic4j.core.model.TimeModification;
+import com.sheetmusic4j.core.model.TimeSignature;
+import com.sheetmusic4j.core.model.Tuplet;
+
+/**
+ * Reads an ABC music notation document into a {@link Score}.
+ *
+ * <p>The parser handles the MVP subset described in the module documentation:
+ * headers (X, T, C, M, L, K, Q), pitched notes with accidentals and octave
+ * marks, rests, chords, ties, slurs, tuplets, broken rhythm, bar lines,
+ * inline fields, and {@code w:} lyric lines. Unsupported constructs
+ * (decorations, grace notes, guitar-chord annotations, multi-voice) are
+ * skipped silently so parsers survive real-world files.
+ *
+ * <p>Only the first tune (leading {@code X:} block) is loaded; subsequent
+ * tunes in a multi-tune file are ignored for MVP.
+ */
+public final class AbcReader {
+
+    /** Divisions per quarter note used by the produced {@link Score}. */
+    private static final int DIVISIONS = 96;
+
+    public Score read(Path path) {
+        try (InputStream in = Files.newInputStream(path)) {
+            return read(in);
+        } catch (IOException e) {
+            throw new AbcException("Could not read ABC file: " + path, e);
+        }
+    }
+
+    public Score read(InputStream in) {
+        try {
+            String text = readAll(in);
+            return parse(text);
+        } catch (IOException e) {
+            throw new AbcException("Failed to read ABC stream", e);
+        }
+    }
+
+    private String readAll(InputStream in) throws IOException {
+        ByteArrayOutputStream buf = new ByteArrayOutputStream();
+        byte[] chunk = new byte[4096];
+        int n;
+        while ((n = in.read(chunk)) > 0) {
+            buf.write(chunk, 0, n);
+        }
+        return buf.toString(StandardCharsets.UTF_8);
+    }
+
+    private Score parse(String text) {
+        List<String> lines = splitLines(text);
+        List<List<String>> tunes = splitTunes(lines);
+        Score.Builder score = Score.builder();
+        int index = 1;
+        for (List<String> tuneLines : tunes) {
+            parseTune(score, tuneLines, index);
+            index++;
+            // MVP: keep parsing subsequent tunes as additional parts so
+            // multi-tune files are still readable. If the user only wants the
+            // first, they can pick score.parts().get(0).
+        }
+        if (score.build().parts().isEmpty()) {
+            // Defensive fallback: produce an empty score rather than throwing
+            // for files that carry no music (headers only).
+            return score.build();
+        }
+        return score.build();
+    }
+
+    private List<String> splitLines(String text) {
+        List<String> out = new ArrayList<>();
+        int start = 0;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '\n') {
+                out.add(text.substring(start, i));
+                start = i + 1;
+            } else if (c == '\r') {
+                out.add(text.substring(start, i));
+                if (i + 1 < text.length() && text.charAt(i + 1) == '\n') {
+                    i++;
+                }
+                start = i + 1;
+            }
+        }
+        if (start < text.length()) {
+            out.add(text.substring(start));
+        }
+        return out;
+    }
+
+    private List<List<String>> splitTunes(List<String> lines) {
+        List<List<String>> out = new ArrayList<>();
+        List<String> current = null;
+        for (String raw : lines) {
+            String stripped = stripInlineComment(raw);
+            if (isBlank(stripped)) {
+                if (current != null && !current.isEmpty()) {
+                    // Blank line terminates a tune only when the tune has
+                    // already accumulated content; otherwise skip.
+                    current = null;
+                }
+                continue;
+            }
+            if (stripped.startsWith("X:")) {
+                current = new ArrayList<>();
+                out.add(current);
+                current.add(stripped);
+            } else if (stripped.startsWith("%%") || stripped.startsWith("%")) {
+                // File-level style/comment lines outside a tune are ignored.
+                if (current != null) {
+                    // If we're inside a tune the comment was already stripped;
+                    // nothing more to do.
+                }
+            } else if (current != null) {
+                current.add(stripped);
+            }
+            // Lines before any X: (file-level info) are ignored for MVP.
+        }
+        return out;
+    }
+
+    private static boolean isBlank(String s) {
+        for (int i = 0; i < s.length(); i++) {
+            if (!Character.isWhitespace(s.charAt(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Strip trailing {@code %} comments. Note ABC allows {@code \%} to escape
+     * a literal percent sign — for MVP we treat all {@code %} as comment
+     * starters, which is safe for parsing (escapes only affect typesetting).
+     */
+    private static String stripInlineComment(String line) {
+        int p = line.indexOf('%');
+        if (p < 0) {
+            return line;
+        }
+        // Preserve leading whitespace/BOM but drop the comment.
+        return line.substring(0, p);
+    }
+
+    private void parseTune(Score.Builder score, List<String> tuneLines, int fallbackIndex) {
+        TuneHeader header = new TuneHeader();
+        header.referenceNumber = fallbackIndex;
+        int cursor = 0;
+        // Header phase: everything up to (and including) K:.
+        boolean bodyStarted = false;
+        while (cursor < tuneLines.size()) {
+            String line = tuneLines.get(cursor);
+            if (isInfoField(line)) {
+                char field = line.charAt(0);
+                String value = line.substring(2).trim();
+                applyHeaderField(header, field, value);
+                cursor++;
+                if (field == 'K') {
+                    bodyStarted = true;
+                    break;
+                }
+            } else {
+                // Body reached without an explicit K: — apply defaults.
+                break;
+            }
+        }
+        if (!bodyStarted && header.key == null) {
+            header.key = KeySignature.cMajor();
+        }
+
+        // Body phase.
+        BodyParser body = new BodyParser(header);
+        while (cursor < tuneLines.size()) {
+            String line = tuneLines.get(cursor);
+            cursor++;
+            if (line == null || isBlank(line)) {
+                continue;
+            }
+            if (isInfoField(line)) {
+                char field = line.charAt(0);
+                String value = line.substring(2);
+                if (field == 'w') {
+                    body.applyLyrics(value.trim());
+                } else if (field == 'W') {
+                    // Uppercase W: is the ABC "words after tune" field:
+                    // free-form verse text that renders below the last
+                    // system rather than aligning to individual notes.
+                    // By convention a single leading space after the colon
+                    // is presentational and stripped.
+                    String w = value;
+                    if (w.startsWith(" ")) {
+                        w = w.substring(1);
+                    }
+                    body.addPostTuneText(w);
+                } else if (field == 'K' || field == 'M' || field == 'L' || field == 'Q') {
+                    body.applyMidTuneField(field, value.trim());
+                }
+                // Other mid-tune info fields (V:, T:, N:, ...) are ignored.
+                continue;
+            }
+            body.parseLine(line);
+        }
+        body.finish();
+
+        Part part = body.buildPart();
+        if (part != null) {
+            score.addPart(part);
+        }
+        // Score-level metadata is taken from the first tune's header. Later
+        // tunes add creators/titles only when the score-level fields are
+        // still unset, to avoid clobbering.
+        if (score.build().workTitle().isEmpty() && header.title != null) {
+            score.workTitle(header.title);
+        }
+        if (header.composer != null && !score.hasCreatorRole("composer")) {
+            Creator creator = Creator.of("composer", header.composer);
+            if (creator != null) {
+                score.addCreator(creator);
+            }
+        }
+    }
+
+    private static boolean isInfoField(String line) {
+        if (line.length() < 2) {
+            return false;
+        }
+        char c = line.charAt(0);
+        if (line.charAt(1) != ':') {
+            return false;
+        }
+        // ABC info-field letters are single ASCII letters (upper or lower case
+        // for a small set: w, W, r, s, ...).
+        return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+    }
+
+    private void applyHeaderField(TuneHeader header, char field, String value) {
+        switch (field) {
+            case 'X' -> {
+                try {
+                    header.referenceNumber = Integer.parseInt(value.trim());
+                } catch (NumberFormatException ignored) {
+                    // Keep fallback numbering.
+                }
+            }
+            case 'T' -> {
+                if (header.title == null) {
+                    header.title = value;
+                } else {
+                    // Additional T: lines are treated as subtitles — appended.
+                    header.title = header.title + " " + value;
+                }
+            }
+            case 'C' -> header.composer = value;
+            case 'M' -> header.timeSignature = parseMeter(value);
+            case 'L' -> header.unitLength = parseUnitLength(value);
+            case 'Q' -> header.tempo = parseTempo(value);
+            case 'K' -> header.key = AbcKey.parse(value);
+            default -> {
+                // Ignore other headers (P, N, R, O, A, Z, S, B, D, F, G, H,
+                // I, U, V, ...) for MVP.
+            }
+        }
+    }
+
+    private static TimeSignature parseMeter(String value) {
+        if (value == null) {
+            return null;
+        }
+        String v = value.trim();
+        if (v.isEmpty() || v.equalsIgnoreCase("none")) {
+            return null;
+        }
+        if (v.equals("C")) {
+            return new TimeSignature(4, 4);
+        }
+        if (v.equals("C|")) {
+            return new TimeSignature(2, 2);
+        }
+        int slash = v.indexOf('/');
+        if (slash > 0 && slash < v.length() - 1) {
+            try {
+                int beats = Integer.parseInt(v.substring(0, slash).trim());
+                int beatType = Integer.parseInt(v.substring(slash + 1).trim());
+                return new TimeSignature(beats, beatType);
+            } catch (NumberFormatException e) {
+                // fall through to null
+            }
+        }
+        return null;
+    }
+
+    private static AbcNoteLength.Fraction parseUnitLength(String value) {
+        if (value == null || value.trim().isEmpty()) {
+            return null;
+        }
+        String v = value.trim();
+        int slash = v.indexOf('/');
+        if (slash < 0) {
+            try {
+                return AbcNoteLength.Fraction.of(Integer.parseInt(v), 1);
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+        try {
+            int num = slash == 0 ? 1 : Integer.parseInt(v.substring(0, slash).trim());
+            int den = Integer.parseInt(v.substring(slash + 1).trim());
+            return AbcNoteLength.Fraction.of(num, den);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static DirectionType.Metronome parseTempo(String value) {
+        if (value == null) {
+            return null;
+        }
+        String v = value.trim();
+        // Q:120  or  Q:1/4=120  or  Q:"Allegro" 1/4=120 (only bpm is used).
+        int eq = v.indexOf('=');
+        String bpmPart = eq >= 0 ? v.substring(eq + 1).trim() : v;
+        // Strip trailing non-digit characters (e.g. "120 bpm" -> "120").
+        int end = 0;
+        while (end < bpmPart.length() && Character.isDigit(bpmPart.charAt(end))) {
+            end++;
+        }
+        if (end == 0) {
+            return null;
+        }
+        try {
+            int bpm = Integer.parseInt(bpmPart.substring(0, end));
+            return new DirectionType.Metronome(NoteType.QUARTER, false, bpm);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /** Header fields collected before the first body line. */
+    private static final class TuneHeader {
+        int referenceNumber = 1;
+        String title;
+        String composer;
+        TimeSignature timeSignature;
+        AbcNoteLength.Fraction unitLength;
+        DirectionType.Metronome tempo;
+        KeySignature key;
+    }
+
+    /**
+     * Fills in the ABC default unit-note-length when one wasn't given
+     * explicitly: {@code 1/16} for compact time signatures (numerator/beat
+     * ratio &lt; 0.75), {@code 1/8} otherwise.
+     */
+    private static AbcNoteLength.Fraction defaultUnitLength(TimeSignature ts) {
+        if (ts == null) {
+            return new AbcNoteLength.Fraction(1, 8);
+        }
+        double ratio = (double) ts.beats() / ts.beatType();
+        if (ratio < 0.75) {
+            return new AbcNoteLength.Fraction(1, 16);
+        }
+        return new AbcNoteLength.Fraction(1, 8);
+    }
+
+    /**
+     * State machine that walks body characters and emits model objects into a
+     * {@link Part.Builder}. One instance per tune.
+     */
+    private final class BodyParser {
+
+        private final Part.Builder part;
+        private AbcNoteLength.Fraction unitLength;
+        private KeySignature key;
+        private TimeSignature timeSignature;
+        private DirectionType.Metronome pendingTempo;
+        private boolean firstMeasureFlushed;
+
+        /** Pending measure being filled by the tokenizer. */
+        private PendingMeasure currentMeasure;
+        /** Reference to {@code currentMeasure.elements}; refreshed on each measure start. */
+        private List<MusicElement> pendingElements;
+        /** Pending measures collected during the current music line. */
+        private final List<PendingMeasure> lineMeasures = new ArrayList<>();
+        private int measureNumber = 1;
+        private final List<Note> lyricNoteAnchors = new ArrayList<>();
+
+        // Pending broken rhythm to apply to the next emitted note (from > or <
+        // encountered immediately after a note).
+        private AbcNoteLength.Fraction nextLengthMultiplier;
+
+        // Tie: whether the next emitted note should receive tieStop=true.
+        private boolean tieToNext;
+
+        // Slur bookkeeping.
+        private int slurDepth;
+
+        // Tuplet bookkeeping.
+        private int tupletCountRemaining;
+        private int tupletActualNotes;
+        private int tupletNormalNotes;
+        private boolean tupletStartPending;
+        private int tupletNumberCounter;
+        private int currentTupletNumber;
+
+        // Chord accumulation.
+        private boolean inChord;
+        private final List<Note> chordNotes = new ArrayList<>();
+
+        // Within-measure explicit accidentals; keyed by pitch-letter+octave.
+        private final Map<String, Integer> measureAccidentals = new HashMap<>();
+
+        // Post-tune W: text lines collected while parsing the body.
+        private final List<String> postTuneText = new ArrayList<>();
+
+        BodyParser(TuneHeader header) {
+            String id = "P" + header.referenceNumber;
+            this.part = Part.builder(id).name(header.title);
+            this.unitLength = header.unitLength != null
+                    ? header.unitLength
+                    : defaultUnitLength(header.timeSignature);
+            this.key = header.key != null ? header.key : KeySignature.cMajor();
+            this.timeSignature = header.timeSignature != null
+                    ? header.timeSignature
+                    : new TimeSignature(4, 4);
+            this.pendingTempo = header.tempo;
+            startMeasure();
+        }
+
+        Part buildPart() {
+            commitLine();
+            for (String line : postTuneText) {
+                part.addPostTuneText(line);
+            }
+            return part.build();
+        }
+
+        void finish() {
+            closeChordIfOpen();
+            closeMeasure();
+            commitLine();
+        }
+
+        /** Append a raw {@code W:} field value to the part-level post-tune text. */
+        void addPostTuneText(String line) {
+            postTuneText.add(line == null ? "" : line);
+        }
+
+        private void startMeasure() {
+            currentMeasure = new PendingMeasure(measureNumber);
+            pendingElements = currentMeasure.elements;
+            if (!firstMeasureFlushed && lineMeasures.isEmpty()) {
+                Attributes attributes = Attributes.builder()
+                        .divisions(DIVISIONS)
+                        .keySignature(key)
+                        .timeSignature(timeSignature)
+                        .clef(Clef.treble())
+                        .build();
+                currentMeasure.attributes = attributes;
+                if (pendingTempo != null) {
+                    currentMeasure.elements.add(new Direction(pendingTempo,
+                            com.sheetmusic4j.core.model.Placement.ABOVE));
+                    pendingTempo = null;
+                }
+            }
+        }
+
+        /** Close the current measure and add it to the line's queue. */
+        private void closeMeasure() {
+            if (currentMeasure == null) {
+                return;
+            }
+            measureAccidentals.clear();
+            if (!currentMeasure.elements.isEmpty() || currentMeasure.attributes != null) {
+                lineMeasures.add(currentMeasure);
+                measureNumber++;
+            }
+            currentMeasure = null;
+        }
+
+        /** Emit all measures buffered during the current music line. */
+        private void commitLine() {
+            for (PendingMeasure pm : lineMeasures) {
+                Measure.Builder b = Measure.builder(pm.number);
+                if (pm.attributes != null) {
+                    b.attributes(pm.attributes);
+                }
+                for (MusicElement el : pm.elements) {
+                    b.addElement(el);
+                }
+                part.addMeasure(b.build());
+                firstMeasureFlushed = true;
+            }
+            lineMeasures.clear();
+        }
+
+        /** Mutable measure state accumulated during a music line. */
+        private static final class PendingMeasure {
+            final int number;
+            Attributes attributes;
+            final List<MusicElement> elements = new ArrayList<>();
+
+            PendingMeasure(int number) {
+                this.number = number;
+            }
+        }
+
+        void applyMidTuneField(char field, String value) {
+            switch (field) {
+                case 'K' -> {
+                    KeySignature ks = AbcKey.parse(value);
+                    if (ks != null) {
+                        this.key = ks;
+                    }
+                }
+                case 'M' -> {
+                    TimeSignature ts = parseMeter(value);
+                    if (ts != null) {
+                        this.timeSignature = ts;
+                    }
+                }
+                case 'L' -> {
+                    AbcNoteLength.Fraction f = parseUnitLength(value);
+                    if (f != null) {
+                        this.unitLength = f;
+                    }
+                }
+                case 'Q' -> {
+                    DirectionType.Metronome m = parseTempo(value);
+                    if (m != null) {
+                        pendingElements.add(new Direction(m, com.sheetmusic4j.core.model.Placement.ABOVE));
+                    }
+                }
+                default -> {
+                    // ignored
+                }
+            }
+        }
+
+        void applyLyrics(String line) {
+            if (line == null || line.isEmpty() || lyricNoteAnchors.isEmpty()) {
+                return;
+            }
+            List<String> syllables = splitLyricSyllables(line);
+            int idx = 0;
+            for (String syl : syllables) {
+                if (idx >= lyricNoteAnchors.size()) {
+                    break;
+                }
+                if (syl.equals("*") || syl.equals("_")) {
+                    // '*' = skip note; '_' = hold syllable (treated as skip
+                    // for MVP).
+                    idx++;
+                    continue;
+                }
+                if (syl.equals("|")) {
+                    // Advance to next measure boundary — approximate by
+                    // consuming remaining anchors until measure boundary is
+                    // reached. For MVP just consume none extra.
+                    continue;
+                }
+                Syllabic syllabic = Syllabic.SINGLE;
+                String text = syl;
+                boolean hasBegin = false;
+                boolean hasEnd = false;
+                if (text.endsWith("-")) {
+                    hasBegin = true;
+                    text = text.substring(0, text.length() - 1);
+                }
+                if (text.startsWith("-")) {
+                    hasEnd = true;
+                    text = text.substring(1);
+                }
+                if (hasBegin && hasEnd) {
+                    syllabic = Syllabic.MIDDLE;
+                } else if (hasBegin) {
+                    syllabic = Syllabic.BEGIN;
+                } else if (hasEnd) {
+                    syllabic = Syllabic.END;
+                }
+                Note anchor = lyricNoteAnchors.get(idx);
+                Note replaced = attachLyric(anchor, new Lyric(text, syllabic, 1));
+                replaceAnchor(idx, replaced);
+                idx++;
+            }
+        }
+
+        private List<String> splitLyricSyllables(String line) {
+            List<String> out = new ArrayList<>();
+            int i = 0;
+            int n = line.length();
+            StringBuilder sb = new StringBuilder();
+            while (i < n) {
+                char c = line.charAt(i);
+                if (c == ' ' || c == '\t') {
+                    if (sb.length() > 0) {
+                        out.add(sb.toString());
+                        sb.setLength(0);
+                    }
+                    i++;
+                } else if (c == '~') {
+                    // '~' is a hard space within a syllable in ABC lyrics.
+                    sb.append(' ');
+                    i++;
+                } else if (c == '\\' && i + 1 < n) {
+                    sb.append(line.charAt(i + 1));
+                    i += 2;
+                } else {
+                    sb.append(c);
+                    i++;
+                }
+            }
+            if (sb.length() > 0) {
+                out.add(sb.toString());
+            }
+            return out;
+        }
+
+        private Note attachLyric(Note note, Lyric lyric) {
+            List<Lyric> merged = new ArrayList<>(note.lyrics());
+            merged.add(lyric);
+            return rebuildNote(note, b -> b.lyrics(merged));
+        }
+
+        private void replaceAnchor(int idx, Note replaced) {
+            Note original = lyricNoteAnchors.get(idx);
+            lyricNoteAnchors.set(idx, replaced);
+            // Search across all pending measures for the original note
+            // reference and substitute the rebuilt one. Lyric application
+            // happens after the whole music line has been parsed, so the
+            // target note may live in an earlier bar of the current line.
+            if (replaceIn(pendingElements, original, replaced)) {
+                return;
+            }
+            for (PendingMeasure pm : lineMeasures) {
+                if (replaceIn(pm.elements, original, replaced)) {
+                    return;
+                }
+            }
+        }
+
+        private static boolean replaceIn(List<MusicElement> list, Note original, Note replaced) {
+            for (int i = list.size() - 1; i >= 0; i--) {
+                MusicElement el = list.get(i);
+                if (el == original) {
+                    list.set(i, replaced);
+                    return true;
+                }
+                if (el instanceof Chord chord) {
+                    List<Note> notes = chord.notes();
+                    for (int j = 0; j < notes.size(); j++) {
+                        if (notes.get(j) == original) {
+                            List<Note> newNotes = new ArrayList<>(notes);
+                            newNotes.set(j, replaced);
+                            list.set(i, new Chord(newNotes));
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+
+        void parseLine(String line) {
+            // Committing any measures from the previous music line now (before
+            // clearing anchors) means any pending w: line has already been
+            // consumed via applyLyrics.
+            commitLine();
+            // Drop a trailing line-continuation backslash if present.
+            String work = line;
+            if (work.endsWith("\\")) {
+                work = work.substring(0, work.length() - 1);
+            }
+            // Reset the lyric anchor list at the start of each music line so
+            // a following w: line attaches only to notes on the current line.
+            lyricNoteAnchors.clear();
+            int i = 0;
+            int n = work.length();
+            boolean lastWasNote = false;
+            while (i < n) {
+                char c = work.charAt(i);
+                if (c == ' ' || c == '\t') {
+                    // Beam break — we simply consume; beam grouping is
+                    // approximated by "adjacent same-flag notes" downstream.
+                    i++;
+                    lastWasNote = false;
+                    continue;
+                }
+                if (c == '%') {
+                    break;
+                }
+                if (c == '|') {
+                    // Bar line (possibly with ':' repeats or '||', '|]', ':|', '::').
+                    while (i < n && (work.charAt(i) == '|' || work.charAt(i) == ':'
+                            || work.charAt(i) == ']' || work.charAt(i) == '[')) {
+                        // '[' after '|' could be a first-ending bracket. Peek
+                        // and stop before an inline info field (see below).
+                        char next = work.charAt(i);
+                        if (next == '[' && isInlineField(work, i)) {
+                            break;
+                        }
+                        i++;
+                    }
+                    closeChordIfOpen();
+                    // A bar in the middle of a body closes the current
+                    // measure and starts a new one.
+                    closeMeasure();
+                    startMeasure();
+                    lastWasNote = false;
+                    continue;
+                }
+                if (c == ':') {
+                    // ':|' handled above; leading ':' is unusual — consume.
+                    i++;
+                    continue;
+                }
+                if (c == '[' && isInlineField(work, i)) {
+                    // Inline field like [K:...], [M:...], [L:...], [Q:...]
+                    int close = work.indexOf(']', i);
+                    if (close < 0) {
+                        i = n;
+                        continue;
+                    }
+                    String content = work.substring(i + 1, close);
+                    if (content.length() >= 2 && content.charAt(1) == ':') {
+                        applyMidTuneField(content.charAt(0), content.substring(2).trim());
+                    }
+                    i = close + 1;
+                    lastWasNote = false;
+                    continue;
+                }
+                if (c == '[') {
+                    // Start of a chord.
+                    closeChordIfOpen();
+                    inChord = true;
+                    chordNotes.clear();
+                    i++;
+                    continue;
+                }
+                if (c == ']') {
+                    closeChordIfOpen();
+                    i++;
+                    lastWasNote = false;
+                    continue;
+                }
+                if (c == '(') {
+                    // Could be tuplet "(3", "(2:3", "(3:2:6" or a slur "("
+                    if (i + 1 < n && Character.isDigit(work.charAt(i + 1))) {
+                        int j = i + 1;
+                        int actual = 0;
+                        while (j < n && Character.isDigit(work.charAt(j))) {
+                            actual = actual * 10 + (work.charAt(j) - '0');
+                            j++;
+                        }
+                        int normal = defaultNormalNotes(actual, timeSignature);
+                        int count = actual;
+                        if (j < n && work.charAt(j) == ':') {
+                            // (p:q:r
+                            j++;
+                            int val = 0;
+                            boolean hasVal = false;
+                            while (j < n && Character.isDigit(work.charAt(j))) {
+                                val = val * 10 + (work.charAt(j) - '0');
+                                hasVal = true;
+                                j++;
+                            }
+                            if (hasVal) {
+                                normal = val;
+                            }
+                            if (j < n && work.charAt(j) == ':') {
+                                j++;
+                                int val2 = 0;
+                                boolean hasVal2 = false;
+                                while (j < n && Character.isDigit(work.charAt(j))) {
+                                    val2 = val2 * 10 + (work.charAt(j) - '0');
+                                    hasVal2 = true;
+                                    j++;
+                                }
+                                if (hasVal2) {
+                                    count = val2;
+                                }
+                            }
+                        }
+                        tupletActualNotes = actual;
+                        tupletNormalNotes = normal;
+                        tupletCountRemaining = count;
+                        tupletStartPending = true;
+                        tupletNumberCounter++;
+                        currentTupletNumber = tupletNumberCounter;
+                        i = j;
+                        continue;
+                    }
+                    slurDepth++;
+                    // Attach slur start to the next emitted note by remembering
+                    // depth changes on a per-note basis.
+                    pendingSlurStart = true;
+                    i++;
+                    continue;
+                }
+                if (c == ')') {
+                    if (slurDepth > 0) {
+                        slurDepth--;
+                        // Retroactively attach the slur stop to the last
+                        // emitted note (ABC convention: ')' closes the slur
+                        // that ends on the note immediately preceding it).
+                        setLastNoteSlurStop();
+                    }
+                    i++;
+                    continue;
+                }
+                if (c == '{') {
+                    // Grace notes — skip to closing '}'.
+                    int close = work.indexOf('}', i);
+                    i = close < 0 ? n : close + 1;
+                    continue;
+                }
+                if (c == '"') {
+                    // Guitar chord annotation or annotation string — skip to
+                    // closing '"'.
+                    int close = work.indexOf('"', i + 1);
+                    i = close < 0 ? n : close + 1;
+                    continue;
+                }
+                if (c == '!' || c == '+') {
+                    // Decoration wrapped in the same delimiter.
+                    int close = work.indexOf(c, i + 1);
+                    i = close < 0 ? n : close + 1;
+                    continue;
+                }
+                if (c == '.' || c == '~' || c == 'H' || c == 'L' || c == 'M'
+                        || c == 'O' || c == 'P' || c == 'R' || c == 'S'
+                        || c == 'T' || c == 'u' || c == 'v') {
+                    // ABC shorthand decorations attached to the following
+                    // note. Only skip when clearly a decoration prefix
+                    // (single char followed by a note letter or accidental).
+                    // Beware: capital A-G are note letters — do NOT skip those.
+                    // H, L, M, O, P, R, S, T are legacy decorations; 'u' and
+                    // 'v' are up/down bow. We check the next char: if it's a
+                    // note letter/accidental/octave-mark, we treat as a
+                    // decoration and skip; otherwise fall through so unrelated
+                    // characters aren't lost.
+                    if (i + 1 < n && isNoteStartChar(work.charAt(i + 1))) {
+                        i++;
+                        continue;
+                    }
+                }
+                if (c == '>' || c == '<') {
+                    // Broken rhythm applied to the just-emitted note and the
+                    // next note.
+                    if (lastWasNote) {
+                        applyBrokenRhythmLeft(c);
+                        // Also queue the multiplier for the next note.
+                        nextLengthMultiplier = c == '>'
+                                ? new AbcNoteLength.Fraction(1, 2)
+                                : new AbcNoteLength.Fraction(3, 2);
+                    }
+                    i++;
+                    continue;
+                }
+                if (c == '-') {
+                    // Tie start on the previously emitted note.
+                    if (lastWasNote) {
+                        setLastNoteTieStart();
+                    }
+                    i++;
+                    tieToNext = true;
+                    continue;
+                }
+                if (c == '&') {
+                    // Voice overlay — MVP treats as end-of-line and continues
+                    // in the same measure. Consume.
+                    i++;
+                    continue;
+                }
+                if (c == '\\') {
+                    i++;
+                    continue;
+                }
+                if (isNoteStartChar(c) || c == 'z' || c == 'x' || c == 'Z' || c == 'X') {
+                    ParsedNote parsed = parseNote(work, i);
+                    i = parsed.consumed;
+                    if (parsed.isRest) {
+                        emitRest(parsed);
+                    } else {
+                        emitNote(parsed);
+                    }
+                    lastWasNote = true;
+                    continue;
+                }
+                // Unknown character — skip conservatively.
+                i++;
+            }
+        }
+
+        private boolean pendingSlurStart;
+
+        private static boolean isInlineField(String line, int at) {
+            // Detects [X:...] where X is a single ASCII letter and ':' follows.
+            if (at + 2 >= line.length()) {
+                return false;
+            }
+            char c = line.charAt(at + 1);
+            if (line.charAt(at + 2) != ':') {
+                return false;
+            }
+            return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+        }
+
+        private static boolean isNoteStartChar(char c) {
+            return (c >= 'A' && c <= 'G') || (c >= 'a' && c <= 'g')
+                    || c == '^' || c == '_' || c == '=';
+        }
+
+        /** All data captured for a single ABC note or rest token. */
+        private static final class ParsedNote {
+            Step step;
+            int octave;
+            int alter;
+            boolean explicitAccidental;
+            AbcNoteLength.Fraction length;
+            boolean isRest;
+            boolean isMeasureRest;
+            int consumed;
+        }
+
+        private ParsedNote parseNote(String line, int start) {
+            ParsedNote out = new ParsedNote();
+            int i = start;
+            int n = line.length();
+
+            // Accidental prefix: ^, ^^, =, _, __
+            int alter = 0;
+            boolean hasAccidental = false;
+            while (i < n) {
+                char c = line.charAt(i);
+                if (c == '^') {
+                    alter += 1;
+                    hasAccidental = true;
+                    i++;
+                } else if (c == '_') {
+                    alter -= 1;
+                    hasAccidental = true;
+                    i++;
+                } else if (c == '=') {
+                    alter = 0;
+                    hasAccidental = true;
+                    i++;
+                } else {
+                    break;
+                }
+            }
+            if (i >= n) {
+                out.consumed = i;
+                return out;
+            }
+            char letter = line.charAt(i);
+            i++;
+
+            if (letter == 'z' || letter == 'x') {
+                out.isRest = true;
+                AbcNoteLength.Parsed p = AbcNoteLength.parseSuffix(line, i);
+                i += p.consumed();
+                out.length = p.multiplier();
+                out.consumed = i;
+                return out;
+            }
+            if (letter == 'Z' || letter == 'X') {
+                // Whole-measure rest (Z), possibly repeated (Z2 = 2 measures).
+                out.isRest = true;
+                out.isMeasureRest = true;
+                AbcNoteLength.Parsed p = AbcNoteLength.parseSuffix(line, i);
+                i += p.consumed();
+                // For simplicity multiply the multiplier by the number of
+                // measures the rest spans in the numerator; downstream we
+                // convert this to full-measure durations.
+                out.length = p.multiplier();
+                out.consumed = i;
+                return out;
+            }
+
+            Step step;
+            int octave;
+            if (letter >= 'A' && letter <= 'G') {
+                step = Step.valueOf(String.valueOf(letter));
+                octave = 4;
+            } else if (letter >= 'a' && letter <= 'g') {
+                step = Step.valueOf(String.valueOf(Character.toUpperCase(letter)));
+                octave = 5;
+            } else {
+                // Unknown letter — treat as rest to keep parser moving.
+                out.isRest = true;
+                out.length = new AbcNoteLength.Fraction(1, 1);
+                out.consumed = i;
+                return out;
+            }
+
+            // Octave marks: ' raises, , lowers (only immediately after letter).
+            while (i < n) {
+                char c = line.charAt(i);
+                if (c == '\'') {
+                    octave++;
+                    i++;
+                } else if (c == ',') {
+                    octave--;
+                    i++;
+                } else {
+                    break;
+                }
+            }
+
+            AbcNoteLength.Parsed p = AbcNoteLength.parseSuffix(line, i);
+            i += p.consumed();
+
+            if (!hasAccidental) {
+                // Resolve alteration from measure carry, then key signature.
+                String carryKey = step.name() + octave;
+                Integer carry = measureAccidentals.get(carryKey);
+                if (carry != null) {
+                    alter = carry;
+                } else {
+                    alter = AbcKey.alterFor(step, this.key);
+                }
+            } else {
+                // Remember the explicit accidental for subsequent notes in
+                // this measure (same letter + octave).
+                measureAccidentals.put(step.name() + octave, alter);
+            }
+
+            out.step = step;
+            out.octave = octave;
+            out.alter = alter;
+            out.explicitAccidental = hasAccidental;
+            out.length = p.multiplier();
+            out.consumed = i;
+            return out;
+            }
+
+        private void emitRest(ParsedNote parsed) {
+            AbcNoteLength.Fraction m = parsed.length;
+            if (parsed.isMeasureRest) {
+                // Full-measure rest — one measure per unit of m.num (denom
+                // ignored). Emit m.num measures each holding one measure-long
+                // rest, but at minimum one.
+                int measures = Math.max(1, m.num());
+                for (int k = 0; k < measures; k++) {
+                    Rest rest = Rest.builder()
+                            .duration(measureDuration())
+                            .type(NoteType.WHOLE)
+                            .build();
+                    pendingElements.add(rest);
+                    lyricNoteAnchors.add(null);
+                    if (k < measures - 1) {
+                        closeMeasure();
+                        startMeasure();
+                    }
+                }
+                return;
+            }
+            AbcNoteLength.Fraction effective = m;
+            if (nextLengthMultiplier != null) {
+                effective = effective.times(nextLengthMultiplier);
+                nextLengthMultiplier = null;
+            }
+            if (tupletCountRemaining > 0) {
+                effective = effective.times(tupletNormalNotes, tupletActualNotes);
+            }
+            Duration duration = toDuration(effective);
+            Rest rest = Rest.builder().duration(duration).build();
+            pendingElements.add(rest);
+            lyricNoteAnchors.add(null);
+        }
+
+        private void emitNote(ParsedNote parsed) {
+            AbcNoteLength.Fraction m = parsed.length;
+            if (nextLengthMultiplier != null) {
+                m = m.times(nextLengthMultiplier);
+                nextLengthMultiplier = null;
+            }
+            TimeModification timeMod = null;
+            List<Tuplet> tuplets = new ArrayList<>();
+            if (tupletCountRemaining > 0) {
+                m = m.times(tupletNormalNotes, tupletActualNotes);
+                timeMod = new TimeModification(tupletActualNotes, tupletNormalNotes);
+                if (tupletStartPending) {
+                    tuplets.add(new Tuplet(currentTupletNumber, Tuplet.Type.START, true));
+                    tupletStartPending = false;
+                }
+                if (tupletCountRemaining == 1) {
+                    tuplets.add(new Tuplet(currentTupletNumber, Tuplet.Type.STOP, true));
+                }
+                tupletCountRemaining--;
+            }
+            Duration duration = toDuration(m);
+            Pitch pitch = new Pitch(parsed.step, parsed.octave, parsed.alter);
+            Note.Builder b = Note.builder()
+                    .pitch(pitch)
+                    .duration(duration);
+            if (parsed.explicitAccidental) {
+                b.displayedAccidental(Accidental.fromAlter(parsed.alter));
+            }
+            if (timeMod != null) {
+                b.timeModification(timeMod);
+                for (Tuplet t : tuplets) {
+                    b.addTuplet(t);
+                }
+            }
+            if (tieToNext) {
+                b.tieStop(true);
+                tieToNext = false;
+            }
+            if (pendingSlurStart) {
+                b.addSlur(new Slur(1, Slur.Type.START, com.sheetmusic4j.core.model.Placement.DEFAULT));
+                pendingSlurStart = false;
+            }
+            Note note = b.build();
+            if (inChord) {
+                chordNotes.add(note);
+            } else {
+                pendingElements.add(note);
+                lyricNoteAnchors.add(note);
+            }
+        }
+
+        private void closeChordIfOpen() {
+            if (!inChord) {
+                return;
+            }
+            inChord = false;
+            if (chordNotes.isEmpty()) {
+                return;
+            }
+            if (chordNotes.size() == 1) {
+                Note only = chordNotes.get(0);
+                pendingElements.add(only);
+                lyricNoteAnchors.add(only);
+            } else {
+                Chord chord = new Chord(chordNotes);
+                pendingElements.add(chord);
+                lyricNoteAnchors.add(chordNotes.get(0));
+            }
+            chordNotes.clear();
+        }
+
+        private void applyBrokenRhythmLeft(char op) {
+            AbcNoteLength.Fraction mul = op == '>'
+                    ? new AbcNoteLength.Fraction(3, 2)
+                    : new AbcNoteLength.Fraction(1, 2);
+            // Find the last emitted note/rest and rescale its duration.
+            for (int i = pendingElements.size() - 1; i >= 0; i--) {
+                MusicElement el = pendingElements.get(i);
+                if (el instanceof Note note) {
+                    Duration scaled = scale(note.duration(), mul);
+                    Note replaced = rebuildNote(note, nb -> nb.duration(scaled));
+                    pendingElements.set(i, replaced);
+                    // Update lyric anchor too if the same note reference.
+                    for (int j = 0; j < lyricNoteAnchors.size(); j++) {
+                        if (lyricNoteAnchors.get(j) == note) {
+                            lyricNoteAnchors.set(j, replaced);
+                        }
+                    }
+                    return;
+                }
+                if (el instanceof Rest rest) {
+                    Duration scaled = scale(rest.duration(), mul);
+                    Rest replaced = Rest.builder().duration(scaled).build();
+                    pendingElements.set(i, replaced);
+                    return;
+                }
+                if (el instanceof Chord chord) {
+                    List<Note> newNotes = new ArrayList<>();
+                    for (Note note : chord.notes()) {
+                        Duration scaled = scale(note.duration(), mul);
+                        newNotes.add(rebuildNote(note, nb -> nb.duration(scaled)));
+                    }
+                    pendingElements.set(i, new Chord(newNotes));
+                    return;
+                }
+            }
+        }
+
+        private void setLastNoteSlurStop() {
+            for (int i = pendingElements.size() - 1; i >= 0; i--) {
+                MusicElement el = pendingElements.get(i);
+                if (el instanceof Note note) {
+                    Note replaced = rebuildNote(note, nb -> nb.addSlur(
+                            new Slur(1, Slur.Type.STOP, com.sheetmusic4j.core.model.Placement.DEFAULT)));
+                    pendingElements.set(i, replaced);
+                    for (int j = 0; j < lyricNoteAnchors.size(); j++) {
+                        if (lyricNoteAnchors.get(j) == note) {
+                            lyricNoteAnchors.set(j, replaced);
+                        }
+                    }
+                    return;
+                }
+                if (el instanceof Chord chord) {
+                    List<Note> newNotes = new ArrayList<>();
+                    Note first = chord.notes().get(0);
+                    for (int k = 0; k < chord.notes().size(); k++) {
+                        Note note = chord.notes().get(k);
+                        if (k == 0) {
+                            newNotes.add(rebuildNote(note, nb -> nb.addSlur(
+                                    new Slur(1, Slur.Type.STOP, com.sheetmusic4j.core.model.Placement.DEFAULT))));
+                        } else {
+                            newNotes.add(note);
+                        }
+                        // reference first only
+                        if (note != first) {
+                            // keep other notes as-is
+                        }
+                    }
+                    pendingElements.set(i, new Chord(newNotes));
+                    return;
+                }
+            }
+        }
+
+        private void setLastNoteTieStart() {
+            for (int i = pendingElements.size() - 1; i >= 0; i--) {
+                MusicElement el = pendingElements.get(i);
+                if (el instanceof Note note) {
+                    Note replaced = rebuildNote(note, nb -> nb.tieStart(true));
+                    pendingElements.set(i, replaced);
+                    for (int j = 0; j < lyricNoteAnchors.size(); j++) {
+                        if (lyricNoteAnchors.get(j) == note) {
+                            lyricNoteAnchors.set(j, replaced);
+                        }
+                    }
+                    return;
+                }
+                if (el instanceof Chord chord) {
+                    List<Note> newNotes = new ArrayList<>();
+                    for (Note note : chord.notes()) {
+                        newNotes.add(rebuildNote(note, nb -> nb.tieStart(true)));
+                    }
+                    pendingElements.set(i, new Chord(newNotes));
+                    return;
+                }
+            }
+        }
+
+        private Duration toDuration(AbcNoteLength.Fraction m) {
+            // quarters = m * 4 * unit.num / unit.den
+            // value = quarters * DIVISIONS
+            long numerator = (long) m.num() * 4L * unitLength.num() * DIVISIONS;
+            long denominator = (long) m.den() * unitLength.den();
+            long value = numerator / denominator;
+            if (value <= 0) {
+                value = 1;
+            }
+            return new Duration((int) value, DIVISIONS);
+        }
+
+        private Duration measureDuration() {
+            long value = Math.round(timeSignature.measureLengthInQuarters() * DIVISIONS);
+            return new Duration((int) Math.max(1, value), DIVISIONS);
+        }
+
+        private static Duration scale(Duration d, AbcNoteLength.Fraction m) {
+            long v = (long) d.value() * m.num() / m.den();
+            return new Duration((int) Math.max(1, v), d.divisions());
+        }
+
+        private static int defaultNormalNotes(int actual, TimeSignature ts) {
+            // ABC default (per spec): (2 in triple time, 3 in duple)
+            // (2 → 3, (3 → 2, (4 → 3, (5 → n, (6 → 2, (7 → n, (8 → 3, (9 → n
+            boolean compound = ts != null && (ts.beats() % 3 == 0 && ts.beats() > 3);
+            return switch (actual) {
+                case 2 -> 3;
+                case 3 -> 2;
+                case 4 -> 3;
+                case 6 -> 2;
+                case 8 -> 3;
+                case 5, 7, 9 -> compound ? 3 : 2;
+                default -> 2;
+            };
+        }
+    }
+
+    /**
+     * Rebuild a {@link Note} with a mutation applied to a fresh builder,
+     * copying all state from the original. Used to "modify" immutable notes.
+     */
+    private static Note rebuildNote(Note original, java.util.function.Consumer<Note.Builder> mutate) {
+        Note.Builder b = Note.builder()
+                .pitch(original.pitch())
+                .duration(original.duration())
+                .type(original.type())
+                .dots(original.dots())
+                .tieStart(original.tieStart())
+                .tieStop(original.tieStop())
+                .beams(new ArrayList<>(original.beams()))
+                .lyrics(new ArrayList<>(original.lyrics()))
+                .staff(original.staff())
+                .articulations(new ArrayList<>(original.articulations()))
+                .slurs(new ArrayList<>(original.slurs()))
+                .tuplets(new ArrayList<>(original.tuplets()));
+        original.displayedAccidental().ifPresent(b::displayedAccidental);
+        original.timeModification().ifPresent(b::timeModification);
+        original.stemUp().ifPresent(b::stemUp);
+        mutate.accept(b);
+        return b.build();
+    }
+}

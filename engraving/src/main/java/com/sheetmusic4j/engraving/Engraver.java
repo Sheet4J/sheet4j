@@ -37,8 +37,24 @@ import com.sheetmusic4j.core.model.TimeSignature;
 import com.sheetmusic4j.core.model.Tuplet;
 import com.sheetmusic4j.engraving.glyph.Glyph;
 import com.sheetmusic4j.engraving.glyph.MarkingCategory;
-import com.sheetmusic4j.engraving.layout.*;
-import com.sheetmusic4j.engraving.placement.*;
+import com.sheetmusic4j.engraving.layout.KeySignatureLayout;
+import com.sheetmusic4j.engraving.layout.LayoutMode;
+import com.sheetmusic4j.engraving.layout.LayoutOptions;
+import com.sheetmusic4j.engraving.layout.LayoutResult;
+import com.sheetmusic4j.engraving.layout.MeasureLayout;
+import com.sheetmusic4j.engraving.layout.NoteAnchor;
+import com.sheetmusic4j.engraving.layout.StaffLayout;
+import com.sheetmusic4j.engraving.layout.SystemBarline;
+import com.sheetmusic4j.engraving.layout.SystemLayout;
+import com.sheetmusic4j.engraving.placement.BeamPlacement;
+import com.sheetmusic4j.engraving.placement.BracketPlacement;
+import com.sheetmusic4j.engraving.placement.GlyphPlacement;
+import com.sheetmusic4j.engraving.placement.HairpinPlacement;
+import com.sheetmusic4j.engraving.placement.SlurPlacement;
+import com.sheetmusic4j.engraving.placement.StemPlacement;
+import com.sheetmusic4j.engraving.placement.TextPlacement;
+import com.sheetmusic4j.engraving.placement.TiePlacement;
+import com.sheetmusic4j.engraving.placement.TupletPlacement;
 
 /**
  * Turns a {@link Score} into a framework-agnostic {@link LayoutResult}.
@@ -388,7 +404,10 @@ public final class Engraver {
             y = staffTop;
             }
 
-            double staffOnlyHeight = y - options.staffSpacing() + options.rightMargin();
+            double postTuneBottom = layoutPostTuneText(score, options, y, texts);
+
+            double staffOnlyBase = y - options.staffSpacing();
+            double staffOnlyHeight = (postTuneBottom > y ? postTuneBottom : staffOnlyBase) + options.rightMargin();
             // Expand the layout's reported height so it also covers any
             // glyph, stem, beam or note anchor that sits below the last
             // staff (e.g. ledger lines for notes well below the bottom
@@ -400,6 +419,45 @@ public final class Engraver {
                     contentBottom + options.rightMargin());
             anchors.sort((a, b) -> Double.compare(a.onsetQuarters(), b.onsetQuarters()));
             return new LayoutResult(systems, texts, anchors, effectiveSystemWidth, height);
+            }
+
+            /**
+             * Emit ABC {@code W:} "words after tune" text lines below the last
+             * system. Returns the y coordinate reached after emitting the block
+             * (equal to {@code startY} when no part carries post-tune text).
+             *
+             * <p>Lines are drawn left-aligned to the same margin used by the
+             * title block so a reader sees the verses laid out like typeset
+             * lyrics under the score, not squeezed into the last measure.
+             */
+            private static double layoutPostTuneText(Score score, LayoutOptions options,
+                    double startY, List<TextPlacement> texts) {
+                if (!options.showTitleTexts()) {
+                    return startY;
+                }
+                boolean any = false;
+                for (Part part : score.parts()) {
+                    if (!part.postTuneText().isEmpty()) {
+                        any = true;
+                        break;
+                    }
+                }
+                if (!any) {
+                    return startY;
+                }
+                double gap = options.staffLineGap();
+                double fontSize = gap * 1.4;
+                double lineHeight = fontSize * 1.3;
+                double x = options.leftMargin();
+                double y = startY + gap * 1.5;
+                for (Part part : score.parts()) {
+                    for (String line : part.postTuneText()) {
+                        y += lineHeight;
+                        texts.add(new TextPlacement(line == null ? "" : line, x, y,
+                                fontSize, TextPlacement.Align.LEFT, MarkingCategory.LYRIC));
+                    }
+                }
+                return y + gap;
             }
 
             /**
